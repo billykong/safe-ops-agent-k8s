@@ -18,7 +18,9 @@ nodes:
     kind: KubeletConfiguration
     # Node-wide cap on processes per pod: the systemic answer to a fork bomb.
     podPidsLimit: 512
+# kind node images ship a version = 2 config (migrated by containerd 2.x), so
+# use the v2 key; the v3 "io.containerd.cri.v1.runtime" key is silently ignored.
 containerdConfigPatches:
 - |-
-  [plugins."io.containerd.cri.v1.runtime".containerd.runtimes.runsc]
+  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
     runtime_type = "io.containerd.runsc.v1"
