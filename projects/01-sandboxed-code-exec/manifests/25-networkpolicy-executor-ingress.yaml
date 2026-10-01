@@ -1,0 +1,21 @@
+# Only the agent may call the executor: pods labelled app=agent in the
+# "agent" namespace, on the executor port. Egress stays denied.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-executor-from-agent
+  namespace: sandboxes
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: agent
+      podSelector:
+        matchLabels:
+          app: agent
+    ports:
+    - port: 8888
+      protocol: TCP

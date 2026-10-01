@@ -21,8 +21,20 @@ spec:
           type: RuntimeDefault
       containers:
       - name: runtime
-        image: python:3.13-slim
-        command: ["sleep", "infinity"]
+        # Built by `make executor-image` and loaded into kind; never pulled.
+        image: sandbox-executor:dev
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8888
+        # exec, not httpGet: without Cilium's iptables rules (see
+        # cluster/cilium-values.yaml) node-originated traffic is classified
+        # as "world", so default-deny drops kubelet HTTP probes. An exec
+        # probe also means the sandbox takes no traffic from the node at all.
+        readinessProbe:
+          exec:
+            command: ["python", "-I", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/healthz', timeout=1)"]
+          periodSeconds: 5
+          timeoutSeconds: 3
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
