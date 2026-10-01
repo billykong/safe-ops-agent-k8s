@@ -1,0 +1,8 @@
+# Sandboxes live in their own namespace, enforced at Pod Security "restricted".
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sandboxes
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

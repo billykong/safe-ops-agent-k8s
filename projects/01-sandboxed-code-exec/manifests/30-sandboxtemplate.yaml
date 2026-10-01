@@ -1,0 +1,36 @@
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxTemplate
+metadata:
+  name: python-gvisor
+  namespace: sandboxes
+spec:
+  podTemplate:
+    spec:
+      runtimeClassName: gvisor
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: runtime
+        image: python:3.13-slim
+        command: ["sleep", "infinity"]
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 64Mi}
+          limits: {cpu: 500m, memory: 256Mi, ephemeral-storage: 128Mi}
+        volumeMounts:
+        - name: scratch
+          mountPath: /tmp
+      volumes:
+      - name: scratch
+        emptyDir:
+          sizeLimit: 64Mi

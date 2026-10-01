@@ -1,0 +1,24 @@
+# Single-node kind cluster with gVisor available as RuntimeClass "gvisor".
+# The host's runsc binaries (from scripts/setup-host.sh) are mounted into the
+# node, and the node's containerd gets a "runsc" runtime handler.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: safe-ops
+nodes:
+- role: control-plane
+  extraMounts:
+  - hostPath: /usr/bin/runsc
+    containerPath: /usr/local/bin/runsc
+    readOnly: true
+  - hostPath: /usr/bin/containerd-shim-runsc-v1
+    containerPath: /usr/local/bin/containerd-shim-runsc-v1
+    readOnly: true
+  kubeadmConfigPatches:
+  - |
+    kind: KubeletConfiguration
+    # Node-wide cap on processes per pod: the systemic answer to a fork bomb.
+    podPidsLimit: 512
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.cri.v1.runtime".containerd.runtimes.runsc]
+    runtime_type = "io.containerd.runsc.v1"

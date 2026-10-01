@@ -1,0 +1,11 @@
+# Default deny, both directions. Sandboxes get no route to the agent, model
+# gateway or API server. Ingress from the agent's executor will be opened
+# explicitly later; DNS-scoped egress (Cilium) comes when a task needs it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: sandboxes
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
