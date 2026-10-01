@@ -4,6 +4,10 @@ metadata:
   name: python-gvisor
   namespace: sandboxes
 spec:
+  # The default ("Managed") makes the controller create a NetworkPolicy per
+  # template that allows egress to the whole public internet. Policies are
+  # additive, so it silently overrides 20-networkpolicy.yaml. We own policy.
+  networkPolicyManagement: Unmanaged
   podTemplate:
     spec:
       runtimeClassName: gvisor

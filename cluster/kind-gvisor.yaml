@@ -4,6 +4,14 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: safe-ops
+networking:
+  # kindnet's NetworkPolicy engine needs CONFIG_NFT_QUEUE, which the stock
+  # WSL2 kernel lacks, so policies silently go unenforced. Cilium (eBPF)
+  # replaces it; see cluster/cilium-values.yaml.
+  disableDefaultCNI: true
+  # Cilium replaces kube-proxy too, so its datapath needs no iptables modules
+  # the WSL2 kernel lacks.
+  kubeProxyMode: none
 nodes:
 - role: control-plane
   extraMounts:
@@ -12,6 +20,11 @@ nodes:
     readOnly: true
   - hostPath: /usr/bin/containerd-shim-runsc-v1
     containerPath: /usr/local/bin/containerd-shim-runsc-v1
+    readOnly: true
+  # Recent runsc releases split the Sentry and helpers into sidecar binaries
+  # that runsc looks up in gvisor-bin/ next to itself.
+  - hostPath: /usr/bin/gvisor-bin
+    containerPath: /usr/local/bin/gvisor-bin
     readOnly: true
   kubeadmConfigPatches:
   - |
