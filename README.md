@@ -2,7 +2,7 @@
 
 Reference implementation of a safe autonomous ops agent on Kubernetes: sandboxed code execution, a CRD-based human approval gate, identity and policy on tool access, and observability with evals. Runs locally on kind (WSL2).
 
-The plan lives in `billy-notes/kubernetes/agentic-systems-learning-track.md`.
+The plan and requirements live in [docs/prd/](docs/prd/README.md).
 
 ## Layout
 
@@ -11,7 +11,7 @@ The plan lives in `billy-notes/kubernetes/agentic-systems-learning-track.md`.
 | `cluster/` | kind cluster config (gVisor runtime wired in) |
 | `scripts/` | Host setup and verification helpers |
 | `projects/01-sandboxed-code-exec/` | agent-sandbox + gVisor, hardened sandbox pods, warm-pool latency |
-| `docs/` | Lab logs |
+| `docs/prd/` | Product requirements: goals, architecture, security requirements, roadmap, and per-project requirements with status |
 
 Projects 2-5 (approval gate, tool identity/policy, observability/evals, local inference) get their own folders as they start.
 
