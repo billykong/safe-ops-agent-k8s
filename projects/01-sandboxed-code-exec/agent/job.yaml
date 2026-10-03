@@ -1,0 +1,37 @@
+# One agent run. Applied by scripts/test-agent.sh (not by `make p1`).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: agent-demo
+  namespace: agent
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels: {app: agent}
+    spec:
+      serviceAccountName: agent
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: agent
+        image: sandbox-agent:dev
+        imagePullPolicy: Never
+        env:
+        - name: TASK_CODE
+          value: |
+            import platform, sys
+            print("sum:", sum(range(1_000_001)))
+            print("kernel:", open("/proc/version").read().split()[2])
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        resources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {cpu: 250m, memory: 128Mi}

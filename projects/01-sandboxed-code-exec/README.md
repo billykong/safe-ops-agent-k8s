@@ -17,7 +17,7 @@ The agent loop and the code sandbox run in separate pods. The sandbox has no cre
 ## Milestones
 1. [x] Cluster up with gVisor; `make verify` passes (7/7, from a clean rebuild)
 2. [x] Minimal executor (HTTP: run code, return stdout/stderr/exit, wall-clock timeout); `make test-executor` passes 8/8
-3. [ ] Agent pod (separate namespace) that claims a sandbox, runs code, releases it
+3. [x] Agent pod (separate namespace) that claims a sandbox, runs code, releases it; `make test-agent` passes 25/25
 4. [ ] Fork-bomb and egress-exfil demos showing which control stops each one
 5. [ ] Benchmarks: cold `Sandbox` vs warm-pool claim latency; runc vs gVisor overhead (CPU, syscall-heavy, I/O)
 
@@ -35,6 +35,14 @@ Standard library only, built as `sandbox-executor:dev` and loaded into kind (`ma
 - The executor is **not** a security boundary. User code runs as the same uid and can kill it. Isolation comes from gVisor, the pod hardening and NetworkPolicy.
 - Tests: `make executor-test` (unit, local) and `make test-executor` (in-cluster). The in-cluster test calls the executor as the agent and checks that both a pod in the `agent` namespace without the label and a labelled pod in another namespace are blocked.
 
+## Agent (`agent/`)
+A Job in the `agent` namespace. It claims a sandbox from the warm pool (about 300 ms), runs `TASK_CODE` through the executor, and always releases the claim, even on error. Claims also carry a 10-minute `shutdownTime` as a backstop if the agent dies. Python standard library only; it talks to the API server by IP, so it needs no DNS. No LLM yet.
+
+The agent's fence, each part tested in `make test-agent`:
+- **RBAC:** `create/get/delete` on `sandboxclaims` and `get` on `sandboxes`, in `sandboxes` only. It cannot create `Sandbox`es directly (which would bypass the hardened template), update or list claims, read pods or secrets, or exec.
+- **Admission:** a `ValidatingAdmissionPolicy` for the agent's service account. Claims must name an approved warm pool and may not add pod labels/annotations, env or volumes. RBAC can grant "may create claims" but not "only safe ones": a claim's `additionalPodMetadata` could relabel the sandbox pod (labels decide which NetworkPolicies match) or annotate it (annotations can change runtime behaviour).
+- **Network:** default-deny in `agent`. Egress is allowed only to the API server (`CiliumNetworkPolicy` `toEntities: kube-apiserver`) and to sandbox port 8888. Internet, cluster DNS and other sandbox ports are blocked.
+
 ## Findings so far
 Each of these was a silent failure: the setup looked healthy, but a control didn't hold.
 
@@ -45,6 +53,8 @@ Each of these was a silent failure: the setup looked healthy, but a control didn
 5. **agent-sandbox opens the internet by default.** Each `SandboxTemplate` gets a generated NetworkPolicy allowing egress to `0.0.0.0/0` minus private ranges. Policies are additive, so it overrode the default-deny. Found with Hubble: world SYNs `FORWARDED`, API server `DENIED`.
 
 6. **On this cluster, Cilium sees all node-originated traffic as `world`.** The BPF IP cache maps the node's IPs to `host`, but Cilium marks host-originated packets as such with an iptables rule, which `installIptablesRules: false` removes. With default-deny ingress, kubelet `httpGet`/`tcpSocket` probes are dropped (`identity world->...` in `cilium-dbg monitor --type drop`). The sandbox now uses an `exec` readiness probe. The same will hit any default-deny namespace, including the agent's (milestone 3). Durable fix: a WSL2 kernel with `xt_socket`/TPROXY so Cilium's iptables rules install, or run on bare metal.
+
+7. **A SandboxClaim can modify the sandbox pod's metadata.** `additionalPodMetadata` lets the claimer add labels and annotations, so "may create claims" is broader than it looks. Fenced with an admission policy (above). The template's `envVarsInjectionPolicy` and `volumeClaimTemplatesPolicy` already default to `Disallowed`.
 
 Lesson for the verify script: always run a negative control. A pod without the policy must succeed where the sandbox is expected to fail. Otherwise "blocked" can just mean "networking is broken".
 

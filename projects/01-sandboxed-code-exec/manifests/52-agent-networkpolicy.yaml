@@ -1,0 +1,43 @@
+# Agent namespace: default deny both ways, then allow only what the agent
+# needs. No DNS: the agent reaches the API server by IP.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: agent
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-to-executor
+  namespace: agent
+spec:
+  podSelector:
+    matchLabels: {app: agent}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: sandboxes
+    ports:
+    - {port: 8888, protocol: TCP}
+---
+# A plain NetworkPolicy ipBlock can't reliably select the API server under
+# Cilium (it resolves to the host/kube-apiserver identity), so use Cilium's
+# entity selector.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agent-to-apiserver
+  namespace: agent
+spec:
+  endpointSelector:
+    matchLabels: {app: agent}
+  egress:
+  - toEntities: [kube-apiserver]
+    toPorts:
+    - ports: [{port: "6443", protocol: TCP}]

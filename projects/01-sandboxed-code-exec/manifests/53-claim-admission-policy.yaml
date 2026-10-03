@@ -1,0 +1,36 @@
+# RBAC can say "the agent may create SandboxClaims" but not "only safe ones".
+# A claim can add labels/annotations to the sandbox pod (labels decide which
+# NetworkPolicies match; annotations can change runtime behaviour), so the
+# agent's claims must name an approved warm pool and add nothing else.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-sandbox-claims
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["extensions.agents.x-k8s.io"]
+      apiVersions: ["*"]
+      resources: ["sandboxclaims"]
+      operations: ["CREATE", "UPDATE"]
+  matchConditions:
+  - name: agent-only
+    expression: request.userInfo.username == "system:serviceaccount:agent:agent"
+  validations:
+  - expression: object.spec.warmPoolRef.name in ["python-gvisor"]
+    message: warmPoolRef must be an approved warm pool
+  - expression: "!has(object.spec.additionalPodMetadata)"
+    message: claims may not add pod labels or annotations
+  - expression: "!has(object.spec.env) || size(object.spec.env) == 0"
+    message: claims may not inject env vars
+  - expression: "!has(object.spec.volumeClaimTemplates) || size(object.spec.volumeClaimTemplates) == 0"
+    message: claims may not add volumes
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-sandbox-claims
+spec:
+  policyName: agent-sandbox-claims
+  validationActions: [Deny]

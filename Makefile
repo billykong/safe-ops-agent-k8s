@@ -3,7 +3,7 @@ CILIUM_VERSION  ?= 1.20.2
 CLUSTER         ?= safe-ops
 P1              := projects/01-sandboxed-code-exec
 
-.PHONY: up down cilium agent-sandbox executor-test executor-image p1 verify test-executor
+.PHONY: up down cilium agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent
 
 up:
 	kind create cluster --config cluster/kind-gvisor.yaml
@@ -30,7 +30,11 @@ executor-image:
 	docker build -t sandbox-executor:dev $(P1)/executor
 	kind load docker-image sandbox-executor:dev --name $(CLUSTER)
 
-p1: executor-image
+agent-image:
+	docker build -t sandbox-agent:dev $(P1)/agent
+	kind load docker-image sandbox-agent:dev --name $(CLUSTER)
+
+p1: executor-image agent-image
 	kubectl apply -f $(P1)/manifests/
 
 verify:
@@ -38,3 +42,6 @@ verify:
 
 test-executor:
 	./scripts/test-executor.sh
+
+test-agent:
+	./scripts/test-agent.sh
