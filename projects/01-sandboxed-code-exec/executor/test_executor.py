@@ -17,6 +17,10 @@ import executor
 class ExecutorTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # RLIMIT_NPROC counts every process of the uid. On a dev host that's
+        # the whole user session, so the cap is exercised in-cluster instead
+        # (scripts/attack-demos.sh).
+        executor.MAX_PROCS = 0
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), executor.Handler)
         cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
@@ -65,6 +69,11 @@ class ExecutorTest(unittest.TestCase):
         _, res = self.post({"code": code, "timeout_s": 2})
         self.assertIn("done", res["stdout"])
         self.assertLess(time.monotonic() - start, 5)
+
+    def test_memory_is_capped(self):
+        code = "x = b'1' * (512 * 2**20)\nprint('allocated')"
+        _, res = self.post({"code": code})
+        self.assertIn("MemoryError", res["stderr"])
 
     def test_output_is_capped(self):
         _, res = self.post({"code": "print('x' * 1_000_000)"})

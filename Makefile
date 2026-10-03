@@ -3,15 +3,27 @@ CILIUM_VERSION  ?= 1.20.2
 CLUSTER         ?= safe-ops
 P1              := projects/01-sandboxed-code-exec
 
-.PHONY: up down cilium agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent
+.PHONY: up down node-swap-off cilium agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos
 
 up:
 	kind create cluster --config cluster/kind-gvisor.yaml
+	$(MAKE) node-swap-off
 	$(MAKE) cilium
 	$(MAKE) agent-sandbox
 
 down:
 	kind delete cluster --name $(CLUSTER)
+
+# Pods must not swap: with host swap available (WSL2 defaults to some), a
+# pod's memory limit isn't a hard cap and a memory bomb thrashes the node.
+# kubelet's NoSwap only covers container cgroups; gVisor's memory is charged
+# at the pod level, so cap swap on the whole kubelet.slice instead.
+node-swap-off:
+	docker exec $(CLUSTER)-control-plane sh -c '\
+	  mkdir -p /etc/systemd/system/kubelet.slice.d && \
+	  printf "[Slice]\nMemorySwapMax=0\n" > /etc/systemd/system/kubelet.slice.d/10-no-swap.conf && \
+	  systemctl daemon-reload && systemctl set-property --runtime kubelet.slice MemorySwapMax=0 && \
+	  echo "kubelet.slice memory.swap.max=$$(cat /sys/fs/cgroup/kubelet.slice/memory.swap.max)"'
 
 cilium:
 	helm repo add cilium https://helm.cilium.io >/dev/null 2>&1 || true
@@ -45,3 +57,6 @@ test-executor:
 
 test-agent:
 	./scripts/test-agent.sh
+
+attack-demos:
+	./scripts/attack-demos.sh

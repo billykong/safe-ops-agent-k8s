@@ -28,7 +28,7 @@ Reference documents (read 2026-09-29):
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
 | SEC-01 | The agent loop and the code sandbox run in **separate pods**. The sandbox has no credentials, no GPU, and no route to the agent, gateways, workflow engine or API server. | Must | **Done**: `make verify`, `make test-executor` |
-| SEC-02 | DNS is treated as an exfiltration channel. The sandbox has no egress by default. Where egress is needed, only allowlisted names can be *resolved* (Cilium L7 DNS), ICMP is blocked, and allowlists are minimal. | Must | **Partial**: no-egress default tested; DNS-scoped egress and ICMP planned (P1) |
+| SEC-02 | DNS is treated as an exfiltration channel. The sandbox has no egress by default. Where egress is needed, only allowlisted names can be *resolved* (Cilium L7 DNS), ICMP is blocked, and allowlists are minimal. | Must | **Partial**: no egress, DNS exfiltration and ICMP blocked (`make attack-demos`); DNS-scoped egress for tasks that need it planned (P1) |
 | SEC-03 | The agent never holds the model API key or tool secrets. Gateways hold them and authenticate the agent by workload identity. | Must | Planned (P3) |
 | SEC-04 | The agent cannot approve its own change: approval is in the status subresource; the agent has no `update` on `changerequests/status`; the approver is recorded from the authenticated request identity; approval needs an authenticated human. | Must | Planned (P2) |
 | SEC-05 | Each approval is bound to exactly what was approved: a content hash of an immutable spec (CEL `self == oldSelf`), an expiry, and a live-state re-check before apply. | Must | Planned (P2) |
@@ -88,6 +88,8 @@ To be kept under `docs/` as the projects land.
 - **A human approver can still be misled** by a well-crafted, policy-compliant change. Deterministic diffs and oversight metrics reduce this; they don't guarantee it.
 - **Single-node lab.** Etcd encryption, node hardening and network segmentation are out of scope unless shown.
 - **WSL2 networking workarounds.** The eBPF-only Cilium datapath means node-originated traffic is classified as `world`; default-deny namespaces use `exec` probes. Results should be re-confirmed on bare metal.
+- **A sandbox can be crashed by its own code.** Memory spread across processes, each under the per-process cap, exceeds the pod limit and kills that sandbox. It's contained (other sandboxes and the node are unaffected), but the task's sandbox is lost; the agent sees a transport error and must release and retry.
+- **gVisor ignores the pod pids limit.** Fork-bomb protection inside sandboxes depends on the executor setting `RLIMIT_NPROC` on user code. Code reaching the sandbox by another path (e.g. `kubectl exec`) isn't covered.
 - **The executor is not a boundary.** User code in the sandbox can kill or tamper with the executor; isolation relies on gVisor, the pod spec and NetworkPolicy.
 
 ## Publishing rules

@@ -32,7 +32,9 @@ nodes:
   kubeadmConfigPatches:
   - |
     kind: KubeletConfiguration
-    # Node-wide cap on processes per pod: the systemic answer to a fork bomb.
+    # Node-wide cap on host processes per pod. Stops fork bombs in runc pods,
+    # but NOT inside gVisor: guest processes are goroutines in the Sentry, not
+    # host tasks. Sandboxes rely on the executor's RLIMIT_NPROC instead.
     podPidsLimit: 512
 # kind node images ship a version = 2 config (migrated by containerd 2.x), so
 # use the v2 key; the v3 "io.containerd.cri.v1.runtime" key is silently ignored.

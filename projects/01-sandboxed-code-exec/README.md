@@ -10,7 +10,9 @@ The agent loop and the code sandbox run in separate pods. The sandbox has no cre
 - [x] `networkPolicyManagement: Unmanaged` on the template, so agent-sandbox doesn't add its own allow-internet policy
 - [x] No service-account token, non-root, read-only rootfs, drop all caps, seccomp RuntimeDefault
 - [x] CPU, memory and ephemeral-storage limits
-- [x] Pids limit (`podPidsLimit: 512` in the kind kubelet config)
+- [x] Pids limit (`podPidsLimit: 512` in the kind kubelet config). Effective for runc pods only; see finding 8
+- [x] Node swap off for pods (`make node-swap-off`, run by `make up`), so the memory limit is a hard cap
+- [x] Executor caps user code with `RLIMIT_NPROC` 32 and `RLIMIT_AS` 192 MiB, kills every leftover process after each run, and runs under `tini`
 - [x] Executor service inside the sandbox, with ingress opened only from `app=agent` pods in the `agent` namespace
 - [ ] Cilium DNS-scoped egress for tasks that need it
 
@@ -18,7 +20,7 @@ The agent loop and the code sandbox run in separate pods. The sandbox has no cre
 1. [x] Cluster up with gVisor; `make verify` passes (7/7, from a clean rebuild)
 2. [x] Minimal executor (HTTP: run code, return stdout/stderr/exit, wall-clock timeout); `make test-executor` passes 8/8
 3. [x] Agent pod (separate namespace) that claims a sandbox, runs code, releases it; `make test-agent` passes 25/25
-4. [ ] Fork-bomb and egress-exfil demos showing which control stops each one
+4. [x] Attack demos showing which control stops each one; `make attack-demos` (report in `results/attack-demos.md`)
 5. [ ] Benchmarks: cold `Sandbox` vs warm-pool claim latency; runc vs gVisor overhead (CPU, syscall-heavy, I/O)
 
 ## Executor (`executor/`)
@@ -27,7 +29,9 @@ Standard library only, built as `sandbox-executor:dev` and loaded into kind (`ma
 - `POST /run {"code": "...", "timeout_s": 10}` returns `{stdout, stderr, exit_code, timed_out, duration_ms, truncated}`.
 - `GET /healthz`.
 - Limits:
-  - the code runs in its own process group, which is SIGKILLed on timeout or exit, so background children can't outlive the run
+  - the code runs in its own process group, which is SIGKILLed on timeout or exit. After that, every other process of the sandbox uid is killed too (`kill(-1)`, repeated until none remain), so even `setsid()`-detached processes can't outlive the run. This also ends any `kubectl exec` session in the sandbox when a run finishes
+  - `RLIMIT_NPROC` 32 and `RLIMIT_AS` 192 MiB per process, enforced by gVisor
+  - `tini` is PID 1 and reaps orphans, so killed processes don't linger as zombies
   - timeout capped at 60s, plus an `RLIMIT_CPU` backstop
   - stdout and stderr capped at 64 KiB each
   - request body capped at 256 KiB
@@ -55,6 +59,12 @@ Each of these was a silent failure: the setup looked healthy, but a control didn
 6. **On this cluster, Cilium sees all node-originated traffic as `world`.** The BPF IP cache maps the node's IPs to `host`, but Cilium marks host-originated packets as such with an iptables rule, which `installIptablesRules: false` removes. With default-deny ingress, kubelet `httpGet`/`tcpSocket` probes are dropped (`identity world->...` in `cilium-dbg monitor --type drop`). The sandbox now uses an `exec` readiness probe. The same will hit any default-deny namespace, including the agent's (milestone 3). Durable fix: a WSL2 kernel with `xt_socket`/TPROXY so Cilium's iptables rules install, or run on bare metal.
 
 7. **A SandboxClaim can modify the sandbox pod's metadata.** `additionalPodMetadata` lets the claimer add labels and annotations, so "may create claims" is broader than it looks. Fenced with an admission policy (above). The template's `envVarsInjectionPolicy` and `volumeClaimTemplatesPolicy` already default to `Disallowed`.
+
+8. **Under gVisor, the pod pids limit doesn't stop a fork bomb.** Guest processes are goroutines in gVisor's Sentry, not host tasks: during a bomb the host cgroup showed 14 of 512 pids used, with zero `pids.max` events, and the whole sandbox crashed. gVisor does enforce `RLIMIT_NPROC`, so the executor sets it. The cap must also fit the memory budget, because each forked Python copies its pages: with 256 MiB, an exponential bomb crashed the sandbox at 64 processes and was contained at 32. The count includes the executor's own threads.
+9. **Host swap makes pod memory limits soft.** With swap on the host (WSL2 defaults to some), `memory.swap.max` was `max` all the way down, and a pod limited to 256 MiB wrote 1 GiB without error. kubelet's `NoSwap` only covers container cgroups, and gVisor's memory is charged at the pod level. Fix: `MemorySwapMax=0` on the node's `kubelet.slice`, which caps every pod regardless of runtime. Testing trap: `bytearray(n)` pages are lazily zero-filled and take no memory until written, so a "1 GiB allocated" result proves nothing.
+10. **Under gVisor, exceeding the pod memory limit kills the whole sandbox.** One clean `MemoryError` early on was a fluke. The executor's `RLIMIT_AS` turns a single over-sized process into a `MemoryError`. Several processes, each under the cap, can still add up past the pod limit; that kills only that sandbox (demonstrated as **CONTAINED**: the other sandbox keeps serving, and the node stays Ready).
+11. **An executor running as PID 1 doesn't reap orphans.** Killed processes stayed as zombies (25 after one bomb), and zombies count against `RLIMIT_NPROC`, so the next run couldn't fork at all. One fork bomb left the sandbox unusable. `tini` as PID 1 fixes it. The attack demos' health check now forks, to catch this.
+12. **Killing the process group misses `setsid()`, and `kill(-1)` races with an in-flight fork.** A detached double-fork survived a single post-run `kill(-1)` under gVisor: the grandchild was created as the signal went out. The executor now repeats `kill(-1)` until nothing but itself and PID 1 is alive.
 
 Lesson for the verify script: always run a negative control. A pod without the policy must succeed where the sandbox is expected to fail. Otherwise "blocked" can just mean "networking is broken".
 

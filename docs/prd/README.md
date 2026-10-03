@@ -20,7 +20,7 @@ This folder is the product requirements document (PRD) for the whole project: wh
 
 | Project | Status |
 | --- | --- |
-| P1 Sandboxed code execution | Milestones 1-3 done; 4-5 next |
+| P1 Sandboxed code execution | Milestones 1-4 done; 5 (benchmarks) next |
 | P2 Approval gate | Not started |
 | P3 Tool identity and policy | Not started |
 | P4 Observability and evals | Not started |

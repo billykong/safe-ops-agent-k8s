@@ -28,8 +28,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 1. **Done.** Cluster with gVisor; sandbox hardening verified (`make verify`).
 2. **Done.** Executor inside the sandbox; agent-only ingress (`make test-executor`).
 3. **Done.** Agent Job claims, uses and releases a sandbox; RBAC, admission and egress fenced (`make test-agent`).
-4. **Next.** Attack demos: fork bomb; egress and DNS exfiltration; ICMP. Each shows the stopping layer.
-5. Benchmarks: cold sandbox vs warm-pool claim; runc vs gVisor overhead (CPU, syscall-heavy, I/O).
+4. **Done.** Attack demos: fork and memory bombs, credential hunt, persistence, TCP egress, DNS exfiltration, ICMP; each shows the stopping layer (`make attack-demos`).
+5. **Next.** Benchmarks: cold sandbox vs warm-pool claim; runc vs gVisor overhead (CPU, syscall-heavy, I/O).
 6. DNS-scoped egress for tasks that need it (Cilium `toFQDNs`), after confirming the DNS proxy works on the WSL2 kernel.
 7. Kata Containers comparison on bare metal.
 
