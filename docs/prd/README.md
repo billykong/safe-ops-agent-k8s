@@ -10,6 +10,7 @@ This folder is the product requirements document (PRD) for the whole project: wh
 | [02-architecture.md](02-architecture.md) | Components, trust boundaries, data flows, environments |
 | [03-security.md](03-security.md) | Threat model (OWASP Agentic Top 10), cross-cutting security requirements, governance artefacts, residual risks, publishing rules |
 | [04-roadmap.md](04-roadmap.md) | Sequencing, dependencies, deliverables, open questions |
+| [../known-gaps.md](../known-gaps.md) | Reproduced weaknesses not yet closed, by ID (`GAP-nn`); tests report them as `GAP` |
 | [projects/p1-sandboxed-code-exec.md](projects/p1-sandboxed-code-exec.md) | P1: sandboxed code execution |
 | [projects/p2-approval-gate.md](projects/p2-approval-gate.md) | P2: Kubernetes-native human approval gate |
 | [projects/p3-tool-identity-policy.md](projects/p3-tool-identity-policy.md) | P3: tool access, identity, policy and prompt-injection defence |

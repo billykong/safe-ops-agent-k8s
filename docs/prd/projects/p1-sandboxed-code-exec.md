@@ -27,7 +27,7 @@ Implementation and findings: [projects/01-sandboxed-code-exec/](../../../project
 | P1-09 | ICMP from the sandbox is blocked. | Must | **Done**: `make attack-demos` (raw socket denied; unprivileged ICMP dropped, seen in Hubble) |
 | P1-10 | Where a task needs egress, only allowlisted DNS names can be resolved and reached (Cilium `toFQDNs`). | Should | **Done**: `make test-egress` (allowlisted names and `pip install` work; other names, IPs, ports and direct DNS blocked; default pool unaffected) |
 | P1-12 | Allowlisted egress pins the TLS SNI, so other sites sharing a CDN address are not reachable by name. | Should | **Done**: `make test-egress` |
-| P1-13 | Egress can't be redirected by domain fronting (SNI of an allowed name, `Host` of another site on the same CDN). Needs an in-cluster mirror or egress proxy rather than direct internet access. | Should | **Gap**: reported by `make test-egress`; planned with P3's gateway |
+| P1-13 | Egress can't be redirected by domain fronting (SNI of an allowed name, `Host` of another site on the same CDN). Needs an in-cluster mirror or egress proxy rather than direct internet access. | Should | **Gap** [GAP-01](../../known-gaps.md#gap-01-domain-fronting-through-the-pypi-egress-allowlist): reported by `make test-egress`; planned with P3's gateway |
 | P1-11 | Kata Containers runtime available as a stronger alternative, benchmarked on bare metal. | Could | Planned (M7) |
 
 ### Lifecycle

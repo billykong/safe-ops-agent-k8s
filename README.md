@@ -2,7 +2,7 @@
 
 Reference implementation of a safe autonomous ops agent on Kubernetes: sandboxed code execution, a CRD-based human approval gate, identity and policy on tool access, and observability with evals. Runs locally on kind (WSL2).
 
-The plan and requirements live in [docs/prd/](docs/prd/README.md).
+The plan and requirements live in [docs/prd/](docs/prd/README.md). Weaknesses we have reproduced but not yet closed are tracked in [docs/known-gaps.md](docs/known-gaps.md).
 
 ## Layout
 

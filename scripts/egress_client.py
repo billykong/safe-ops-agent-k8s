@@ -1,7 +1,7 @@
 """Runs inside an agent-identity pod. Submits probes through the executors
 of two sandboxes: one from the pypi egress pool, one from the default pool
-(negative control). Prints one line per check: PASS, FAIL or GAP (a known,
-documented weakness that the suite reports rather than fails on).
+(negative control). Prints one line per check: PASS, FAIL or GAP <id> (a
+known weakness from docs/known-gaps.md, reported rather than failed on).
 
 Usage: egress_client.py PYPI_SANDBOX_IP DEFAULT_SANDBOX_IP
 """
@@ -65,8 +65,9 @@ print("INSTALLED six", six.__version__)
 """
 
 
-def check(name, ok, out, gap=False):
-    verdict = "PASS" if ok else ("GAP" if gap else "FAIL")
+def check(name, ok, out, gap=None):
+    # gap: a known-gap ID from docs/known-gaps.md, reported instead of failing.
+    verdict = "PASS" if ok else (f"GAP {gap}" if gap else "FAIL")
     print(f"{verdict}  {name}: {out}", flush=True)
 
 
@@ -88,7 +89,7 @@ check("allowlisted name on another port blocked (pypi.org:80)", o.startswith("BL
 o = run(pypi_ip, TLS.format(sni="www.fastly.com", host="www.fastly.com"))
 check("other site on the same CDN IP, by SNI, blocked", o.startswith("BLOCKED"), o)
 o = run(pypi_ip, TLS.format(sni="pypi.org", host="www.fastly.com"))
-check("domain fronting (SNI pypi.org, Host www.fastly.com) blocked", o.startswith("BLOCKED"), o, gap=True)
+check("domain fronting (SNI pypi.org, Host www.fastly.com) blocked", o.startswith("BLOCKED"), o, gap="GAP-01")
 
 o = run(default_ip, RESOLVE.format(name="pypi.org"))
 check("negative control: default sandbox can't resolve pypi.org", o.startswith("REFUSED"), o)

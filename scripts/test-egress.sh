@@ -3,7 +3,7 @@
 # pool and one from the default pool (negative control), then probes both
 # through their executors from an agent-identity pod. Host-side evidence: the
 # DNS proxy's refusals in Hubble. Exits non-zero on any FAIL; a GAP is a
-# known weakness that is reported, not failed (see the P1 README).
+# known weakness that is reported, not failed (docs/known-gaps.md).
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 cd "$(dirname "$0")/.."
