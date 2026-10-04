@@ -10,11 +10,29 @@ k8sServicePort: 6443
 installIptablesRules: false
 bpf:
   masquerade: true
-  # eBPF TPROXY keeps the DNS proxy (toFQDNs policies) working.
+  # eBPF TPROXY redirects DNS to Cilium's DNS proxy (toFQDNs policies).
   tproxy: true
+# Translate service IPs per packet at the pod's interface, not in the
+# connect()/sendmsg() socket hooks. gVisor's sockets live in its own network
+# stack, so the hooks never see them: a sandbox's packets to a ClusterIP
+# (kube-dns) left still addressed to the VIP, which policy sees as "world".
+socketLB:
+  hostNamespaceOnly: true
+dnsProxy:
+  # Transparent mode forwards queries with the pod's source IP, and steering
+  # the reply back to the proxy needs the iptables "socket --transparent"
+  # match the WSL2 kernel lacks: every allowed lookup timed out. Without it
+  # the proxy queries from its own address.
+  enableTransparentMode: false
 operator:
   replicas: 1
 hubble:
   enabled: true
   relay:
     enabled: true
+envoy:
+  # Same problem as the DNS proxy: Envoy's upstream connections (L7 and TLS
+  # SNI policy) used the pod's source IP, and replies need the missing
+  # iptables socket match to get back to Envoy, so every upstream connect
+  # timed out. Connect from Envoy's own address instead.
+  useOriginalSourceAddress: false

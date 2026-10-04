@@ -30,8 +30,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 3. **Done.** Agent Job claims, uses and releases a sandbox; RBAC, admission and egress fenced (`make test-agent`).
 4. **Done.** Attack demos: fork and memory bombs, credential hunt, persistence, TCP egress, DNS exfiltration, ICMP; each shows the stopping layer (`make attack-demos`).
 5. **Done.** Benchmarks: cold sandbox vs warm-pool claim; runc vs gVisor overhead (CPU, syscall-heavy, I/O) (`make bench`).
-6. **Next.** DNS-scoped egress for tasks that need it (Cilium `toFQDNs`), after confirming the DNS proxy works on the WSL2 kernel.
-7. Kata Containers comparison on bare metal.
+6. **Done.** DNS-scoped egress for tasks that need it (Cilium `toFQDNs`, DNS proxy, SNI pin) (`make test-egress`). Domain fronting remains open (P1-13).
+7. **Next.** Kata Containers comparison on bare metal.
 
 ### P2: approval gate
 1. `ChangeRequest` CRD with immutable spec, status-subresource approval, and the controller (kubebuilder).
@@ -81,8 +81,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 
 | Question | Needed by |
 | --- | --- |
-| Does Cilium's DNS proxy (`toFQDNs`) work with the eBPF-only datapath on the stock WSL2 kernel, or is a custom kernel or bare metal needed? | P1 M6 |
-| Build a custom WSL2 kernel with `xt_socket`/TPROXY/`NFT_QUEUE`, or move networking-sensitive work to bare metal? | P1 M6 |
+| ~~Does Cilium's DNS proxy (`toFQDNs`) work with the eBPF-only datapath on the stock WSL2 kernel?~~ Yes, with transparent mode off (and Envoy not using the original source address). | Resolved (P1 M6) |
+| Build a custom WSL2 kernel with `xt_socket`/TPROXY/`NFT_QUEUE`, or move networking-sensitive work to bare metal? | Not blocking: each missing-module gap so far has a workaround (P1 README findings 4, 6, 19). Revisit on bare metal (P1 M7) |
 | Temporal vs LangGraph `interrupt` for durable execution | P2 M5 |
 | Approval channel: CLI only, or a Slack-style webhook with real authentication? | P2 M2 |
 | Kyverno vs OPA Gatekeeper vs plain ValidatingAdmissionPolicy for the action gate | P3 M4 |

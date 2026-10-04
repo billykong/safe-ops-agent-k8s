@@ -7,12 +7,13 @@ P1              := projects/01-sandboxed-code-exec
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: up down node-swap-off cilium agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench
+.PHONY: up down node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress
 
 up:
 	kind create cluster --config cluster/kind-gvisor.yaml
 	$(MAKE) node-swap-off
 	$(MAKE) cilium
+	$(MAKE) coredns-upstream
 	$(MAKE) agent-sandbox
 
 down:
@@ -33,7 +34,20 @@ cilium:
 	helm repo add cilium https://helm.cilium.io >/dev/null 2>&1 || true
 	helm upgrade --install cilium cilium/cilium --version $(CILIUM_VERSION) \
 	  --kube-context kind-$(CLUSTER) --namespace kube-system -f cluster/cilium-values.yaml --wait --timeout 10m
+	# Agents read their config at start; a changed value needs a restart.
+	$(KUBECTL) -n kube-system rollout restart ds/cilium deploy/cilium-operator
+	$(KUBECTL) -n kube-system rollout status ds/cilium --timeout=180s
 	$(KUBECTL) wait --for=condition=Ready nodes --all --timeout=180s
+
+# kind points the node's resolver at an address that the node's iptables
+# DNAT to Docker's embedded DNS. Cilium's eBPF host routing skips the node's
+# iptables, so CoreDNS's forwarded queries never reach it and every external
+# name fails. Forward to explicit public resolvers instead.
+coredns-upstream:
+	$(KUBECTL) -n kube-system get cm coredns -o yaml \
+	  | sed 's|forward \. /etc/resolv.conf|forward . 1.1.1.1 8.8.8.8|' | $(KUBECTL) apply -f -
+	$(KUBECTL) -n kube-system rollout restart deploy/coredns
+	$(KUBECTL) -n kube-system rollout status deploy/coredns --timeout=120s
 
 agent-sandbox:
 	$(KUBECTL) apply --server-side -f https://github.com/kubernetes-sigs/agent-sandbox/releases/download/$(SANDBOX_VERSION)/sandbox-with-extensions.yaml
@@ -67,3 +81,6 @@ attack-demos:
 
 bench:
 	./scripts/bench.sh
+
+test-egress:
+	./scripts/test-egress.sh

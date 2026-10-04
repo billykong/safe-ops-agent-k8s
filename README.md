@@ -23,6 +23,7 @@ make up                        # kind cluster + agent-sandbox controller
 make p1                        # RuntimeClass, namespace, policy, template, warm pool
 make verify                    # claim a sandbox, check gVisor + hardening
 make bench                     # startup latency and gVisor vs runc overhead
+make test-egress               # DNS-scoped egress for the pypi sandbox pool
 ```
 
 ## Publishing

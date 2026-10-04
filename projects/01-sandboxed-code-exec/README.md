@@ -14,7 +14,7 @@ The agent loop and the code sandbox run in separate pods. The sandbox has no cre
 - [x] Node swap off for pods (`make node-swap-off`, run by `make up`), so the memory limit is a hard cap
 - [x] Executor caps user code with `RLIMIT_NPROC` 32 and `RLIMIT_AS` 192 MiB, kills every leftover process after each run, and runs under `tini`
 - [x] Executor service inside the sandbox, with ingress opened only from `app=agent` pods in the `agent` namespace
-- [ ] Cilium DNS-scoped egress for tasks that need it
+- [x] DNS-scoped egress for sandboxes that need it: a separate `python-gvisor-pypi` template and warm pool, whose pods may resolve and reach only `pypi.org` and `files.pythonhosted.org` on 443, with the TLS SNI pinned
 
 ## Milestones
 1. [x] Cluster up with gVisor; `make verify` passes (7/7, from a clean rebuild)
@@ -22,6 +22,8 @@ The agent loop and the code sandbox run in separate pods. The sandbox has no cre
 3. [x] Agent pod (separate namespace) that claims a sandbox, runs code, releases it; `make test-agent` passes 25/25
 4. [x] Attack demos showing which control stops each one; `make attack-demos` (report in `results/attack-demos.md`)
 5. [x] Benchmarks: cold `Sandbox` vs warm-pool claim latency; runc vs gVisor overhead (CPU, syscall-heavy, I/O); `make bench` (report in `results/benchmarks.md`)
+6. [x] DNS-scoped egress (Cilium `toFQDNs` + DNS proxy + SNI); `make test-egress` passes 13/13 plus Hubble evidence, with domain fronting reported as a known gap
+7. [ ] Kata Containers comparison
 
 ## Executor (`executor/`)
 Standard library only, built as `sandbox-executor:dev` and loaded into kind (`make executor-image`, run by `make p1`).
@@ -72,6 +74,12 @@ Each of these was a silent failure: the setup looked healthy, but a control didn
 16. **A tight CPU limit roughly doubles gVisor's overhead.** At 500m, syscall and file-metadata workloads were 5-10x slower than runc; with 2 CPUs, 3-5x. The Sentry's work is charged to the pod's quota alongside the user code. Benchmarks at 500m also swung by 2x between runs (CFS throttling in 100 ms periods), so the overhead comparison uses 2 CPUs.
 17. **The scripts targeted whatever kubectl context was current.** Creating another kind cluster (from another project) switched the current context to it, and every `make` target here would have run there. A test run against the wrong cluster can report PASS or FAIL for controls that don't exist. The Makefile and scripts now pin `--context kind-$(CLUSTER)` (`scripts/lib.sh`).
 
+18. **Under gVisor, Cilium's socket-level load balancing never sees the sandbox's sockets.** With kube-proxy replacement, Cilium translates service IPs in `connect()`/`sendmsg()` cgroup hooks. gVisor's sockets live in its own network stack, so a sandbox's packets to kube-dns left still addressed to the ClusterIP, which policy classifies as `world`: no rule naming kube-dns could ever match. Earlier "cluster DNS blocked" results held, but because the VIP was `world`, not because of the rule. Fix: `socketLB.hostNamespaceOnly: true`, so pod traffic is translated per packet at the interface.
+19. **Cilium's DNS proxy enforced the allowlist, but every allowed answer timed out.** In transparent mode it forwards with the pod's source IP, and steering the reply back to the proxy needs the iptables `socket --transparent` match the WSL2 kernel lacks (the same gap as finding 4). Fix: `dnsProxy.enableTransparentMode: false`; CoreDNS then sees the node's address, not the pod's, while Hubble keeps per-pod attribution. Envoy (used for the SNI check) had the same problem: `envoy.useOriginalSourceAddress: false`.
+20. **No pod in the cluster could resolve external names.** kind points the node's resolver at an address that the node's iptables DNAT to Docker's embedded DNS. Cilium's eBPF host routing skips the node's iptables, so CoreDNS's forwarded queries went to a real host that refused them. Nothing needed external DNS until now. Fix: CoreDNS forwards to `1.1.1.1`/`8.8.8.8` (`make coredns-upstream`, run by `make up`).
+21. **The default `ndots:5` breaks an exact-name DNS allowlist.** `pypi.org` is first tried with each search suffix (`pypi.org.sandboxes.svc.cluster.local`, ...), and the proxy refuses those. The egress template sets `ndots:1`. Exact names, not wildcards: `*.pypi.org` would let code encode data in subdomain queries (`secret.pypi.org`) that reach the zone's authoritative servers.
+22. **`toFQDNs` allows IPs, not names, and CDNs share IPs.** Through PyPI's Fastly address, a sandbox reached `www.python.org`, `www.fastly.com` and the NYT's origin. Pinning the TLS SNI (`serverNames`) stops that. But domain fronting still works: with SNI `pypi.org` and an HTTP `Host` header naming another Fastly customer, Fastly routes by the encrypted `Host`, which network policy can't see. Closing it needs TLS interception or, better, no direct internet at all: an in-cluster package mirror or egress proxy as the sandbox's only destination (P3's tool gateway). `make test-egress` reports this as a GAP.
+
 Lesson for the verify script: always run a negative control. A pod without the policy must succeed where the sandbox is expected to fail. Otherwise "blocked" can just mean "networking is broken".
 
 ## Benchmarks (`make bench`)
@@ -90,6 +98,13 @@ Headline numbers (kind on WSL2, Ryzen 5 5600H; full tables and caveats in `resul
 | Syscalls / file metadata / process spawn / loopback TCP | 2.9x / 4.6x / 10.5x / 1.25x runc | 1x |
 
 So the warm pool is worth ~2.5 s per task, and the pool must be sized for the burst: claims beyond it wait for a cold start.
+
+## DNS-scoped egress (`make test-egress`)
+Sandboxes get no egress by default. A task that needs packages claims from the `python-gvisor-pypi` warm pool instead (approved in the agent's admission policy). Its template is the default one plus a pod label, set by the operator (claims can't add labels), that `65-networkpolicy-egress-pypi.yaml` selects:
+- DNS only to kube-dns, through Cilium's DNS proxy, which answers only `pypi.org` and `files.pythonhosted.org` and refuses everything else.
+- TCP 443 only to IPs the proxy has seen for those names (`toFQDNs`), and only with a matching TLS SNI.
+
+`make test-egress` probes through the executor from an agent-identity pod: allowed lookups, HTTPS and a real `pip install` work; other names (including subdomain exfiltration), direct DNS to public resolvers, other IPs, other ports and other SNIs on the same CDN address are blocked; a default-pool sandbox, as a negative control, can do none of it. Hubble shows the proxy's refusals independently.
 
 ## Results
 See `results/`.

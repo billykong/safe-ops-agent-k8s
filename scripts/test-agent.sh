@@ -57,6 +57,8 @@ YAML
 }
 out=$(claim "  warmPoolRef: {name: python-gvisor}")
 grep -q 'created (server dry run)' <<<"$out" && pass "plain claim allowed" || fail "plain claim rejected: $out"
+out=$(claim "  warmPoolRef: {name: python-gvisor-pypi}")
+grep -q 'created (server dry run)' <<<"$out" && pass "egress (pypi) pool claim allowed" || fail "pypi pool claim rejected: $out"
 for case in \
   "other warm pool|  warmPoolRef: {name: something-else}" \
   "pod labels|  warmPoolRef: {name: python-gvisor}

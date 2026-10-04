@@ -1,0 +1,79 @@
+# Same as 30-sandboxtemplate.yaml (keep the two in sync), plus a label that
+# opts its pods into egress to an allowlist of DNS names (Python packages).
+# Separate template and warm pool, so sandboxes without the need get none.
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxTemplate
+metadata:
+  name: python-gvisor-pypi
+  namespace: sandboxes
+spec:
+  # The default ("Managed") makes the controller create a NetworkPolicy per
+  # template that allows egress to the whole public internet. Policies are
+  # additive, so it silently overrides 20-networkpolicy.yaml. We own policy.
+  networkPolicyManagement: Unmanaged
+  podTemplate:
+    metadata:
+      # Selects 65-networkpolicy-egress-pypi.yaml. Set here by the operator;
+      # the agent's claims can't add labels (53-claim-admission-policy.yaml).
+      labels:
+        sandbox.safe-ops.io/egress: pypi
+    spec:
+      runtimeClassName: gvisor
+      # The DNS policy allows exact names only. With the default ndots:5,
+      # "pypi.org" is first tried with each search suffix
+      # (pypi.org.sandboxes.svc.cluster.local, ...), and those are refused.
+      # ndots:1 resolves any dotted name as given first.
+      dnsConfig:
+        options:
+        - {name: ndots, value: "1"}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: runtime
+        # Built by `make executor-image` and loaded into kind; never pulled.
+        image: sandbox-executor:dev
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8888
+        # exec, not httpGet: without Cilium's iptables rules (see
+        # cluster/cilium-values.yaml) node-originated traffic is classified
+        # as "world", so default-deny drops kubelet HTTP probes. An exec
+        # probe also means the sandbox takes no traffic from the node at all.
+        # The probe is a raw socket with -S (no site): under gVisor, file
+        # metadata calls are ~15x slower, so a probe that imports urllib took
+        # ~0.75 s in a 500m sandbox; this one takes ~0.3 s.
+        # The 1s startup probe finds the executor up as soon as it listens; a
+        # 5s readiness probe alone left cold sandboxes (and warm-pool refills)
+        # up to 5.5 s late. See results/benchmarks.md.
+        startupProbe:
+          exec:
+            command: &probe ["python", "-I", "-S", "-c", "import socket; s = socket.create_connection(('127.0.0.1', 8888), 1); s.sendall(b'GET /healthz HTTP/1.0\\r\\n\\r\\n'); assert b' 200 ' in s.recv(64)"]
+          periodSeconds: 1
+          timeoutSeconds: 3
+          failureThreshold: 60
+        readinessProbe:
+          exec:
+            command: *probe
+          periodSeconds: 5
+          timeoutSeconds: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        resources:
+          requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 64Mi}
+          limits: {cpu: 500m, memory: 256Mi, ephemeral-storage: 128Mi}
+        volumeMounts:
+        - name: scratch
+          mountPath: /tmp
+      volumes:
+      - name: scratch
+        emptyDir:
+          sizeLimit: 64Mi

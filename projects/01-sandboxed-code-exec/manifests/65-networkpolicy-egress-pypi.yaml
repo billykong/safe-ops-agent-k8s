@@ -1,0 +1,39 @@
+# DNS-scoped egress for sandboxes that need to fetch Python packages.
+# Two halves, both needed:
+# 1. DNS goes to kube-dns only, through Cilium's DNS proxy, which answers
+#    only the exact names listed and refuses the rest. Exact names, not
+#    wildcards: "*.example.org" would let code encode data in subdomain
+#    queries that reach that zone's authoritative servers.
+# 2. TCP 443 only to IPs that the proxy has seen returned for those names
+#    (toFQDNs). Everything else stays denied by 20-networkpolicy.yaml.
+# toFQDNs allows IPs, not names: any other site served from the same IP
+# (shared CDN) is reachable too. See the P1 README.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: egress-pypi
+  namespace: sandboxes
+spec:
+  endpointSelector:
+    matchLabels:
+      sandbox.safe-ops.io/egress: pypi
+  egress:
+  - toEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: kube-system
+        k8s:k8s-app: kube-dns
+    toPorts:
+    - ports:
+      - {port: "53", protocol: UDP}
+      - {port: "53", protocol: TCP}
+      rules:
+        dns:
+        - matchName: pypi.org
+        - matchName: files.pythonhosted.org
+  - toFQDNs:
+    - matchName: pypi.org
+    - matchName: files.pythonhosted.org
+    toPorts:
+    - ports:
+      - {port: "443", protocol: TCP}
+      serverNames: [pypi.org, files.pythonhosted.org]

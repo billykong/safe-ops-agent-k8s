@@ -25,7 +25,9 @@ Implementation and findings: [projects/01-sandboxed-code-exec/](../../../project
 | P1-07 | Only the agent (`app=agent` in namespace `agent`) can reach the sandbox, and only on the executor port. | Must | **Done**: `make test-executor`, `make test-agent` |
 | P1-08 | No policy is added behind our back: the sandbox template sets `networkPolicyManagement: Unmanaged`. | Must | **Done**: `make verify` egress check would fail otherwise |
 | P1-09 | ICMP from the sandbox is blocked. | Must | **Done**: `make attack-demos` (raw socket denied; unprivileged ICMP dropped, seen in Hubble) |
-| P1-10 | Where a task needs egress, only allowlisted DNS names can be resolved and reached (Cilium `toFQDNs`). | Should | Planned (M6); WSL2 kernel support unconfirmed |
+| P1-10 | Where a task needs egress, only allowlisted DNS names can be resolved and reached (Cilium `toFQDNs`). | Should | **Done**: `make test-egress` (allowlisted names and `pip install` work; other names, IPs, ports and direct DNS blocked; default pool unaffected) |
+| P1-12 | Allowlisted egress pins the TLS SNI, so other sites sharing a CDN address are not reachable by name. | Should | **Done**: `make test-egress` |
+| P1-13 | Egress can't be redirected by domain fronting (SNI of an allowed name, `Host` of another site on the same CDN). Needs an in-cluster mirror or egress proxy rather than direct internet access. | Should | **Gap**: reported by `make test-egress`; planned with P3's gateway |
 | P1-11 | Kata Containers runtime available as a stronger alternative, benchmarked on bare metal. | Could | Planned (M7) |
 
 ### Lifecycle
@@ -58,7 +60,7 @@ Implementation and findings: [projects/01-sandboxed-code-exec/](../../../project
 | --- | --- | --- | --- |
 | P1-40 | The agent runs in its own namespace and pod, never in the sandbox. | Must | **Done**: `make test-agent` |
 | P1-41 | Agent RBAC: `create/get/delete` on `sandboxclaims` and `get` on `sandboxes` in `sandboxes` only. No direct `Sandbox` creation, no claim update or list, no pods, exec or secrets. | Must | **Done**: `make test-agent` |
-| P1-42 | Admission policy: the agent's claims must name an approved warm pool and may not add pod labels/annotations, env or volumes. Denials come from the policy, not schema validation. | Must | **Done**: `make test-agent` |
+| P1-42 | Admission policy: the agent's claims must name an approved warm pool (`python-gvisor`, `python-gvisor-pypi`) and may not add pod labels/annotations, env or volumes. Denials come from the policy, not schema validation. | Must | **Done**: `make test-agent` |
 | P1-43 | Agent egress: only the API server and sandbox port 8888. No internet, no DNS, no other sandbox ports. | Must | **Done**: `make test-agent` |
 | P1-44 | The agent always releases its claim, including on error. | Must | **Partial**: release on success tested; error path not tested |
 
@@ -68,7 +70,7 @@ Implementation and findings: [projects/01-sandboxed-code-exec/](../../../project
 | --- | --- | --- | --- |
 | P1-50 | Attack demos: fork bomb, memory bombs, credential hunt, persistence, TCP egress, DNS exfiltration, ICMP. Each names the layer that stopped it, with independent host-side evidence (restart counts, Hubble drops). | Must | **Done**: `make attack-demos`; report in `results/attack-demos.md` |
 | P1-51 | Benchmarks: cold `Sandbox` vs warm-pool claim latency; runc vs gVisor overhead for CPU, syscall-heavy and I/O workloads. Each states the runtime and environment used. | Must | **Done**: `make bench`; report in `results/benchmarks.md` |
-| P1-52 | A clean rebuild (`make down up p1`) passes all P1 suites. | Must | **Done**: last run 7 + 8 + 25 + 9 checks |
+| P1-52 | A clean rebuild (`make down up p1`) passes all P1 suites. | Must | **Done**: last run (2026-10-04) 7 + 8 + 26 + 13 + 9 checks across verify, test-executor, test-agent, test-egress and attack-demos; test-egress also reports its 1 known GAP |
 
 ## Acceptance
 
