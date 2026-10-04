@@ -3,6 +3,7 @@
 # hardening holds. Each check prints PASS/FAIL; the script exits non-zero if
 # any check fails.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 NS=sandboxes
 CLAIM="verify-$(date +%s)"
 

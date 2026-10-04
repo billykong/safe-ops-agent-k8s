@@ -29,8 +29,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 2. **Done.** Executor inside the sandbox; agent-only ingress (`make test-executor`).
 3. **Done.** Agent Job claims, uses and releases a sandbox; RBAC, admission and egress fenced (`make test-agent`).
 4. **Done.** Attack demos: fork and memory bombs, credential hunt, persistence, TCP egress, DNS exfiltration, ICMP; each shows the stopping layer (`make attack-demos`).
-5. **Next.** Benchmarks: cold sandbox vs warm-pool claim; runc vs gVisor overhead (CPU, syscall-heavy, I/O).
-6. DNS-scoped egress for tasks that need it (Cilium `toFQDNs`), after confirming the DNS proxy works on the WSL2 kernel.
+5. **Done.** Benchmarks: cold sandbox vs warm-pool claim; runc vs gVisor overhead (CPU, syscall-heavy, I/O) (`make bench`).
+6. **Next.** DNS-scoped egress for tasks that need it (Cilium `toFQDNs`), after confirming the DNS proxy works on the WSL2 kernel.
 7. Kata Containers comparison on bare metal.
 
 ### P2: approval gate
@@ -88,4 +88,5 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 | Kyverno vs OPA Gatekeeper vs plain ValidatingAdmissionPolicy for the action gate | P3 M4 |
 | SPIFFE/SPIRE vs projected SA tokens for workload identity | P3 M1 |
 | Does the NVIDIA device plugin work on WSL2's `/dev/dxg` with k3s? | P5 M2 |
+| The kind node sees `/dev/kvm` (nested virtualisation under WSL2). Does gVisor's KVM platform, or Kata, work there, and how does it compare with systrap? | P1 M7 |
 | Which hosted model for the agent loop, and its cost budget | P3 M2 |

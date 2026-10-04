@@ -3,6 +3,7 @@
 # agent-identity client pod (must work), and from two non-agent pods (must be
 # blocked by NetworkPolicy). Exits non-zero on any failure.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 cd "$(dirname "$0")"
 NS=sandboxes
 CLAIM="exec-test-$(date +%s)"

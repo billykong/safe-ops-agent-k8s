@@ -6,6 +6,7 @@
 # projects/01-sandboxed-code-exec/results/attack-demos.md and exits non-zero
 # if any attack gets through or the sandbox doesn't survive.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 cd "$(dirname "$0")/.."
 NS=sandboxes
 CLAIM="attack-$(date +%s)"

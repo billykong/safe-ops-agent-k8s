@@ -2,8 +2,12 @@ SANDBOX_VERSION ?= v1.0.4
 CILIUM_VERSION  ?= 1.20.2
 CLUSTER         ?= safe-ops
 P1              := projects/01-sandboxed-code-exec
+# Always target this cluster, never whatever context is current: creating
+# another kind cluster switches the current context to it.
+KUBECTL         := kubectl --context kind-$(CLUSTER)
+export CLUSTER
 
-.PHONY: up down node-swap-off cilium agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos
+.PHONY: up down node-swap-off cilium agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench
 
 up:
 	kind create cluster --config cluster/kind-gvisor.yaml
@@ -28,12 +32,12 @@ node-swap-off:
 cilium:
 	helm repo add cilium https://helm.cilium.io >/dev/null 2>&1 || true
 	helm upgrade --install cilium cilium/cilium --version $(CILIUM_VERSION) \
-	  --namespace kube-system -f cluster/cilium-values.yaml --wait --timeout 10m
-	kubectl wait --for=condition=Ready nodes --all --timeout=180s
+	  --kube-context kind-$(CLUSTER) --namespace kube-system -f cluster/cilium-values.yaml --wait --timeout 10m
+	$(KUBECTL) wait --for=condition=Ready nodes --all --timeout=180s
 
 agent-sandbox:
-	kubectl apply --server-side -f https://github.com/kubernetes-sigs/agent-sandbox/releases/download/$(SANDBOX_VERSION)/sandbox-with-extensions.yaml
-	kubectl -n agent-sandbox-system rollout status deploy --timeout=180s
+	$(KUBECTL) apply --server-side -f https://github.com/kubernetes-sigs/agent-sandbox/releases/download/$(SANDBOX_VERSION)/sandbox-with-extensions.yaml
+	$(KUBECTL) -n agent-sandbox-system rollout status deploy --timeout=180s
 
 executor-test:
 	cd $(P1)/executor && python3 -m unittest test_executor.py
@@ -47,7 +51,7 @@ agent-image:
 	kind load docker-image sandbox-agent:dev --name $(CLUSTER)
 
 p1: executor-image agent-image
-	kubectl apply -f $(P1)/manifests/
+	$(KUBECTL) apply -f $(P1)/manifests/
 
 verify:
 	./scripts/verify-gvisor.sh
@@ -60,3 +64,6 @@ test-agent:
 
 attack-demos:
 	./scripts/attack-demos.sh
+
+bench:
+	./scripts/bench.sh

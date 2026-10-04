@@ -4,6 +4,7 @@
 # checks: the agent's RBAC, the claim admission policy, and the agent's
 # network egress. Exits non-zero on any failure.
 set -euo pipefail
+source "$(dirname "$0")/lib.sh"
 cd "$(dirname "$0")/.."
 AS=system:serviceaccount:agent:agent
 FAILED=0

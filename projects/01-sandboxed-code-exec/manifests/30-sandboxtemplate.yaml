@@ -30,9 +30,21 @@ spec:
         # cluster/cilium-values.yaml) node-originated traffic is classified
         # as "world", so default-deny drops kubelet HTTP probes. An exec
         # probe also means the sandbox takes no traffic from the node at all.
+        # The probe is a raw socket with -S (no site): under gVisor, file
+        # metadata calls are ~15x slower, so a probe that imports urllib took
+        # ~0.75 s in a 500m sandbox; this one takes ~0.3 s.
+        # The 1s startup probe finds the executor up as soon as it listens; a
+        # 5s readiness probe alone left cold sandboxes (and warm-pool refills)
+        # up to 5.5 s late. See results/benchmarks.md.
+        startupProbe:
+          exec:
+            command: &probe ["python", "-I", "-S", "-c", "import socket; s = socket.create_connection(('127.0.0.1', 8888), 1); s.sendall(b'GET /healthz HTTP/1.0\\r\\n\\r\\n'); assert b' 200 ' in s.recv(64)"]
+          periodSeconds: 1
+          timeoutSeconds: 3
+          failureThreshold: 60
         readinessProbe:
           exec:
-            command: ["python", "-I", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/healthz', timeout=1)"]
+            command: *probe
           periodSeconds: 5
           timeoutSeconds: 3
         securityContext:

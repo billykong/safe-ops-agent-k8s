@@ -1,0 +1,39 @@
+# Benchmark-only identity, applied and deleted by scripts/bench.sh (never by
+# `make p1`). Broader than the agent's: it creates Sandboxes directly, to time
+# cold starts and to build a runc twin of the gVisor template for overhead
+# comparisons. The agent's admission policy doesn't match this account.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bench
+  namespace: agent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bench
+  namespace: sandboxes
+rules:
+- apiGroups: ["agents.x-k8s.io"]
+  resources: ["sandboxes"]
+  verbs: ["create", "get", "delete"]
+- apiGroups: ["extensions.agents.x-k8s.io"]
+  resources: ["sandboxclaims"]
+  verbs: ["create", "get", "delete"]
+- apiGroups: ["extensions.agents.x-k8s.io"]
+  resources: ["sandboxtemplates", "sandboxwarmpools"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bench
+  namespace: sandboxes
+subjects:
+- kind: ServiceAccount
+  name: bench
+  namespace: agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bench
