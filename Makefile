@@ -74,19 +74,13 @@ agent-image:
 	docker build -t sandbox-agent:dev $(P1)/agent
 	kind load docker-image sandbox-agent:dev --name $(CLUSTER)
 
-# Pull third-party images on the host, with retries, and load them into the
-# node, instead of letting the node pull them. A registry CDN that resets
-# large downloads failed a clean rebuild halfway; host pulls keep finished
-# layers between attempts and are cached across rebuilds.
+# Third-party images go into the node through scripts/fetch_image.py, not
+# the node's own pulls: large layers kept failing with resets and stalls from
+# a NAT on the path, and containerd restarts a failed layer from zero. The
+# script resumes each blob with HTTP Range requests, verifies its sha256,
+# caches it across rebuilds, and imports only this platform's manifest.
 define preload
-	docker image inspect $(1) >/dev/null 2>&1 || \
-	  for i in 1 2 3 4 5 6 7 8 9 10; do docker pull -q $(1) && break; echo "pull $(1) failed ($$i), retrying"; sleep 15; done
-	docker image inspect $(1) >/dev/null
-	# Not `kind load docker-image`: it imports with --all-platforms, and
-	# Docker keeps only this host's platform of a multi-arch image, so the
-	# import fails with "content digest ... not found".
-	docker save $(1) | docker exec -i $(CLUSTER)-control-plane \
-	  ctr -n k8s.io images import --digests --snapshotter=overlayfs -
+	python3 scripts/fetch_image.py $(1) --node $(CLUSTER)-control-plane
 endef
 
 # The test clients (agent-identity pods in the scripts) run this image.
