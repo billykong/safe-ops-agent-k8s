@@ -23,7 +23,7 @@ The agent loop and the code sandbox run in separate pods. The sandbox has no cre
 4. [x] Attack demos showing which control stops each one; `make attack-demos` (report in `results/attack-demos.md`)
 5. [x] Benchmarks: cold `Sandbox` vs warm-pool claim latency; runc vs gVisor overhead (CPU, syscall-heavy, I/O); `make bench` (report in `results/benchmarks.md`)
 6. [x] DNS-scoped egress (Cilium `toFQDNs` + DNS proxy + SNI); `make test-egress` passes 13/13 plus Hubble evidence, with domain fronting reported as a known gap
-7. [ ] Kata Containers comparison
+7. [x] Kata Containers comparison, on WSL2 with nested KVM (`make kata`, `make verify-kata`, `make attack-demos-kata`, Kata rows in `make bench`)
 
 ## Executor (`executor/`)
 Standard library only, built as `sandbox-executor:dev` and loaded into kind (`make executor-image`, run by `make p1`).
@@ -72,13 +72,22 @@ Each of these was a silent failure: the setup looked healthy, but a control didn
 14. **Exec probes are expensive under gVisor.** The probe imported `urllib`, which opens and stats dozens of module files, the slowest path under gVisor: each probe took ~0.75 s in a 500m sandbox, every 5 s, for the sandbox's whole life. A raw-socket probe with `python -I -S` takes ~0.3 s.
 15. **gVisor's "CPU overhead" on this host was a Spectre mitigation.** A pure-Python loop ran 1.6x slower under gVisor, with no syscalls in it. The kernel forces SSBD (Speculative Store Bypass Disable) on seccomp-filtered processes, and every gVisor process shows `Speculation_Store_Bypass: thread force mitigated`; runc's container seccomp filter opts out. Forcing SSBD on the runc process with `prctl` reproduced the slowdown (233 → 389 ms). SHA-256 in C was unaffected (0.99x).
 16. **A tight CPU limit roughly doubles gVisor's overhead.** At 500m, syscall and file-metadata workloads were 5-10x slower than runc; with 2 CPUs, 3-5x. The Sentry's work is charged to the pod's quota alongside the user code. Benchmarks at 500m also swung by 2x between runs (CFS throttling in 100 ms periods), so the overhead comparison uses 2 CPUs.
-17. **The scripts targeted whatever kubectl context was current.** Creating another kind cluster (from another project) switched the current context to it, and every `make` target here would have run there. A test run against the wrong cluster can report PASS or FAIL for controls that don't exist. The Makefile and scripts now pin `--context kind-$(CLUSTER)` (`scripts/lib.sh`).
+17. **The scripts targeted whatever kubectl context was current.** Creating another kind cluster (from another project) switched the current context to it, and every `make` target here would have run there. A test run against the wrong cluster can report PASS or FAIL for controls that don't exist. The Makefile and scripts now pin `--context kind-$(CLUSTER)` (`scripts/lib.sh`). The reverse holds too: `make up` would have switched another project's sessions to this cluster, so it now has kind write a separate kubeconfig and merges it in without changing `current-context`.
 
 18. **Under gVisor, Cilium's socket-level load balancing never sees the sandbox's sockets.** With kube-proxy replacement, Cilium translates service IPs in `connect()`/`sendmsg()` cgroup hooks. gVisor's sockets live in its own network stack, so a sandbox's packets to kube-dns left still addressed to the ClusterIP, which policy classifies as `world`: no rule naming kube-dns could ever match. Earlier "cluster DNS blocked" results held, but because the VIP was `world`, not because of the rule. Fix: `socketLB.hostNamespaceOnly: true`, so pod traffic is translated per packet at the interface.
 19. **Cilium's DNS proxy enforced the allowlist, but every allowed answer timed out.** In transparent mode it forwards with the pod's source IP, and steering the reply back to the proxy needs the iptables `socket --transparent` match the WSL2 kernel lacks (the same gap as finding 4). Fix: `dnsProxy.enableTransparentMode: false`; CoreDNS then sees the node's address, not the pod's, while Hubble keeps per-pod attribution. Envoy (used for the SNI check) had the same problem: `envoy.useOriginalSourceAddress: false`.
 20. **No pod in the cluster could resolve external names.** kind points the node's resolver at an address that the node's iptables DNAT to Docker's embedded DNS. Cilium's eBPF host routing skips the node's iptables, so CoreDNS's forwarded queries went to a real host that refused them. Nothing needed external DNS until now. Fix: CoreDNS forwards to `1.1.1.1`/`8.8.8.8` (`make coredns-upstream`, run by `make up`).
 21. **The default `ndots:5` breaks an exact-name DNS allowlist.** `pypi.org` is first tried with each search suffix (`pypi.org.sandboxes.svc.cluster.local`, ...), and the proxy refuses those. The egress template sets `ndots:1`. Exact names, not wildcards: `*.pypi.org` would let code encode data in subdomain queries (`secret.pypi.org`) that reach the zone's authoritative servers.
 22. **`toFQDNs` allows IPs, not names, and CDNs share IPs.** Through PyPI's Fastly address, a sandbox reached `www.python.org`, `www.fastly.com` and the NYT's origin. Pinning the TLS SNI (`serverNames`) stops that. But domain fronting still works: with SNI `pypi.org` and an HTTP `Host` header naming another Fastly customer, Fastly routes by the encrypted `Host`, which network policy can't see. Closing it needs TLS interception or, better, no direct internet at all: an in-cluster package mirror or egress proxy as the sandbox's only destination (P3's tool gateway). `make test-egress` reports this as `GAP GAP-01`; details and options in [docs/known-gaps.md](../../docs/known-gaps.md).
+
+23. **Kata runs on WSL2, with one hypervisor.** The kind node sees `/dev/kvm` (nested AMD SVM), so Kata boots real VMs. QEMU can't be used: the stock WSL2 kernel has no `CONFIG_VHOST_VSOCK` for talking to the guest agent. Cloud Hypervisor implements vsock in the VMM over a Unix socket and works (`kata-clh`). Dragonball (runtime-rs) fails because it moves itself into the pod's cgroup through systemd over D-Bus, and kind's node runs no D-Bus.
+24. **Neither runtime applied the pod's seccomp profile to user code.** Kata's default `disable_guest_seccomp = true` skips `RuntimeDefault` in the guest (`Seccomp: 0`, and `add_key` worked against the guest kernel). Fixed: `disable_guest_seccomp = false`. gVisor doesn't load OCI seccomp in the sandbox either, by design: its Sentry implements the syscalls and is itself seccomp-confined on the host.
+25. **A pod annotation could change the Kata guest's kernel command line.** The default allows `io.katacontainers.config.hypervisor.kernel_params`. Disabled (`enable_annotations = []`); the claim admission policy (finding 7) already blocks annotations from the agent.
+26. **By default the Kata VM ran outside every host resource limit.** With `sandbox_cgroup_only = false`, the VMM landed in a cgroup at the root of the hierarchy (kind's systemd-style cgroup path, created literally), with no memory, CPU, pids or swap limit, while the pod's own cgroup sat empty. The node's swap-off (finding 9) didn't cover it either. Fixed: `sandbox_cgroup_only = true`; `make verify-kata` checks every VMM is under `kubelet.slice`.
+27. **With the VM inside the pod's cgroup, Kata's defaults got it OOM-killed.** The default VM has a 2 GiB base plus the container limit hot-plugged, against a declared overhead of 130 MiB. The guest never felt memory pressure, and the host OOM-killed the whole VM during the single-process memory bomb. Fixed: 256 MiB base and a 320 MiB RuntimeClass overhead, so the guest's own limits act first.
+28. **Memory containment is finer-grained under Kata.** The multi-process memory bomb that kills a gVisor sandbox is handled inside the Kata guest: its kernel OOM-kills individual processes (5 of 8) and the sandbox keeps serving. As under gVisor, the pod pids limit doesn't reach guest processes (the guest cgroup's `pids.max` is `max`), so the executor's `RLIMIT_NPROC` still stops fork bombs. `kubectl exec` sessions in a Kata guest lack `no_new_privs`; the executor and user code have it.
+
+29. **A clean rebuild depended on registries behaving.** Pulls inside the kind node of `python:3.13-slim` and the 1 GB `kata-deploy` image failed with `connection reset by peer` from the registry CDN, and the rebuild carried on with half its suites failing. `make p1` and `make kata` now pull third-party images on the host, with retries (finished layers are kept between attempts), and import them into the node. Not with `kind load docker-image`: it imports with `--all-platforms`, and Docker keeps only this host's platform of a multi-arch image, so the import fails with `content digest ... not found`.
 
 Lesson for the verify script: always run a negative control. A pod without the policy must succeed where the sandbox is expected to fail. Otherwise "blocked" can just mean "networking is broken".
 
@@ -87,17 +96,18 @@ An in-cluster client (its own `bench` identity in the agent namespace, same netw
 - **Startup:** warm-pool claim vs a cold `Sandbox` from the same template, under gVisor and runc, to `Ready` and to the first successful `POST /run`. Plus a burst of 4 claims against a pool of 2.
 - **Overhead:** the same workloads (CPU, syscalls, file metadata, small files, sequential I/O, process spawn, loopback TCP, interpreter start) through the executor in a gVisor and a runc sandbox built from the template.
 
-Headline numbers (kind on WSL2, Ryzen 5 5600H; full tables and caveats in `results/benchmarks.md`):
+Headline numbers (kind on WSL2, Ryzen 5 5600H, overhead at 2 CPUs; full tables and caveats in `results/benchmarks.md`):
 
-| | gVisor | runc |
-| --- | --- | --- |
-| Warm claim → first run | ~210 ms | n/a |
-| Cold `Sandbox` → first run | ~2.7 s | ~1.3 s |
-| Claims beyond the pool size (burst) | ~3.4 s | n/a |
-| Fresh Python start (every run pays it) | ~57 ms | ~18 ms |
-| Syscalls / file metadata / process spawn / loopback TCP | 2.9x / 4.6x / 10.5x / 1.25x runc | 1x |
+| | gVisor | Kata (CLH) | runc |
+| --- | --- | --- | --- |
+| Warm claim → first run | ~270 ms | ~150 ms | n/a |
+| Cold `Sandbox` → first run | ~3.2 s | ~4.2 s | ~1.6 s |
+| Claims beyond the pool size (burst, gVisor) | ~3.4-4.2 s | | n/a |
+| Fresh Python start (every run pays it) | ~90 ms | ~73 ms | ~18 ms |
+| Syscalls / file metadata / process spawn / loopback TCP, vs runc | 2.8x / 4.9x / 10.4x / 1.2x | 0.4x / 0.5x / 10.8x / 0.3x | 1x |
+| Small files / sequential read on `/tmp`, vs runc | 4.8x / 2.0x | 19.8x / 4.7x (virtio-fs) | 1x |
 
-So the warm pool is worth ~2.5 s per task, and the pool must be sized for the burst: claims beyond it wait for a cold start.
+So the warm pool is worth ~3 s per task under gVisor and ~4 s under Kata, and the pool must be sized for the burst: claims beyond it wait for a cold start.
 
 ## DNS-scoped egress (`make test-egress`)
 Sandboxes get no egress by default. A task that needs packages claims from the `python-gvisor-pypi` warm pool instead (approved in the agent's admission policy). Its template is the default one plus a pod label, set by the operator (claims can't add labels), that `65-networkpolicy-egress-pypi.yaml` selects:
@@ -105,6 +115,13 @@ Sandboxes get no egress by default. A task that needs packages claims from the `
 - TCP 443 only to IPs the proxy has seen for those names (`toFQDNs`), and only with a matching TLS SNI.
 
 `make test-egress` probes through the executor from an agent-identity pod: allowed lookups, HTTPS and a real `pip install` work; other names (including subdomain exfiltration), direct DNS to public resolvers, other IPs, other ports and other SNIs on the same CDN address are blocked; a default-pool sandbox, as a negative control, can do none of it. Hubble shows the proxy's refusals independently.
+
+## Kata Containers (`make kata`)
+Optional, installed after `make p1`: the upstream `kata-deploy` chart with Cloud Hypervisor only (`cluster/kata-values.yaml`), plus a `python-kata` template and warm pool (`manifests/kata/`, the same hardened template with `runtimeClassName: kata-clh`). Each sandbox is a VM with its own guest kernel. The configuration changes four defaults (findings 24-27): guest seccomp on, no hypervisor annotations, the whole sandbox in the pod's cgroup, and the VM sized to fit the pod's declared overhead.
+
+- `make verify-kata`: the hardening checks plus guest kernel, guest seccomp, and VMM cgroup placement.
+- `make attack-demos-kata`: the same attacks, report in `results/attack-demos-kata.md`.
+- `make bench` adds Kata rows when the RuntimeClass exists.
 
 ## Results
 See `results/`.

@@ -151,14 +151,23 @@ except FileNotFoundError:
     print("no beacon")
 """
 
+# Under gVisor this kills the whole sandbox (the agent sees a transport
+# error); under Kata the guest kernel OOM-kills some of the processes and the
+# sandbox lives. Either way the limit must hold: never all 8 holding 64 MiB.
 CRASH = ("memory-bomb-multiprocess",
          "8 processes x 64 MiB each: every one under the per-process cap, 512 MiB in total", """
 import os, time
+kids = []
 for _ in range(8):
-    if os.fork() == 0:
-        x = b"\\x01" * (64 * 2**20); time.sleep(20); os._exit(0)
-time.sleep(20)
-print("survived")
+    pid = os.fork()
+    if pid == 0:
+        x = b"\\x01" * (64 * 2**20); time.sleep(15); os._exit(0)
+    kids.append(pid)
+killed = 0
+for pid in kids:
+    _, st = os.waitpid(pid, 0)
+    killed += os.WIFSIGNALED(st) and os.WTERMSIG(st) == 9
+print(f"{8 - killed} of 8 survived, {killed} OOM-killed")
 """, 30)
 
 if phase == "main":

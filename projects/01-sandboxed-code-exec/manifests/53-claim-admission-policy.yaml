@@ -18,7 +18,7 @@ spec:
   - name: agent-only
     expression: request.userInfo.username == "system:serviceaccount:agent:agent"
   validations:
-  - expression: object.spec.warmPoolRef.name in ["python-gvisor", "python-gvisor-pypi"]
+  - expression: object.spec.warmPoolRef.name in ["python-gvisor", "python-gvisor-pypi", "python-kata"]
     message: warmPoolRef must be an approved warm pool
   - expression: "!has(object.spec.additionalPodMetadata)"
     message: claims may not add pod labels or annotations

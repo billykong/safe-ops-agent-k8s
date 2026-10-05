@@ -84,7 +84,7 @@ To be kept under `docs/` as the projects land.
 ## Residual risks (stated openly)
 
 - **Prompt injection is not solved.** The design limits its impact; it doesn't prevent it.
-- **gVisor is a user-space kernel, not a VM.** On WSL2 only gVisor is available. For hostile code, Kata or a microVM is stronger; every benchmark states which was used.
+- **gVisor is a user-space kernel, not a VM.** For hostile code, a VM boundary is stronger. Kata with Cloud Hypervisor is available as an alternative (`make kata`), including on WSL2 through nested KVM, but its defaults needed four fixes to keep the hardening (P1 README findings 24-27). Every benchmark states which runtime was used.
 - **A human approver can still be misled** by a well-crafted, policy-compliant change. Deterministic diffs and oversight metrics reduce this; they don't guarantee it.
 - **Single-node lab.** Etcd encryption, node hardening and network segmentation are out of scope unless shown.
 - **WSL2 networking workarounds.** The eBPF-only Cilium datapath means node-originated traffic is classified as `world`; default-deny namespaces use `exec` probes. Cilium's DNS proxy and Envoy run non-transparent, so upstreams (CoreDNS, PyPI) see the node's address, not the pod's; Hubble keeps per-pod attribution. Results should be re-confirmed on bare metal.

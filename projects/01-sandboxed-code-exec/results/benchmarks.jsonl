@@ -1,174 +1,263 @@
 {"kind": "workloads", "items": [{"id": "cpu-python", "desc": "CPU: pure-Python loop, 2M iterations"}, {"id": "cpu-sha256", "desc": "CPU: SHA-256 of 64 MiB (C code, no syscalls)"}, {"id": "syscall-getppid", "desc": "Syscalls: 100k getppid()"}, {"id": "file-stat", "desc": "File metadata: 50k stat() on /tmp"}, {"id": "file-small", "desc": "Small files: 2,000 x create, write 4 KiB, close, unlink in /tmp"}, {"id": "io-write", "desc": "Sequential write: 32 MiB to /tmp in 1 MiB chunks, then fsync"}, {"id": "io-read", "desc": "Sequential read: 32 MiB from /tmp in 1 MiB chunks (written just before)"}, {"id": "spawn", "desc": "Process spawn: 50 x subprocess.run(['/bin/true'])"}, {"id": "net-loopback", "desc": "Network stack: 2,000 TCP round trips of 64 bytes over 127.0.0.1"}]}
-{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 0, "ready_ms": 45.279760000084934, "first_run_ms": 219.62778700003582}
-{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 1, "ready_ms": 52.14667899986125, "first_run_ms": 184.81331499992848}
-{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 2, "ready_ms": 44.76903099998708, "first_run_ms": 268.8766139999643}
-{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 3, "ready_ms": 53.42571999995016, "first_run_ms": 224.03508200000033}
-{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 4, "ready_ms": 44.357345999969766, "first_run_ms": 241.0853589999533}
-{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 5, "ready_ms": 45.53901200006294, "first_run_ms": 197.4018260000321}
-{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 6, "ready_ms": 46.204474999967715, "first_run_ms": 133.88804999999593}
-{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 7, "ready_ms": 48.787941999989926, "first_run_ms": 206.8214270000226}
-{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 8, "ready_ms": 49.91758799997115, "first_run_ms": 182.78873600002044}
-{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 9, "ready_ms": 45.00637099999949, "first_run_ms": 267.58523800003786}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 0, "ready_ms": 3973.50634899999, "first_run_ms": 2625.273641000149}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 0, "ready_ms": 2535.9060449998196, "first_run_ms": 1236.384777000012}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 1, "ready_ms": 3979.2945649999183, "first_run_ms": 2554.931700999987}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 1, "ready_ms": 2909.905966999986, "first_run_ms": 1432.9301430000214}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 2, "ready_ms": 4007.968109999865, "first_run_ms": 2970.3149429999485}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 2, "ready_ms": 2979.8518330001116, "first_run_ms": 1554.0896580000663}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 3, "ready_ms": 4215.998946999889, "first_run_ms": 3003.038512999865}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 3, "ready_ms": 2755.374512999879, "first_run_ms": 1350.9072360000118}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 4, "ready_ms": 3987.6055199999882, "first_run_ms": 3051.606039000035}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 4, "ready_ms": 1935.5922839999948, "first_run_ms": 1336.4672249999785}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 5, "ready_ms": 4000.326125999891, "first_run_ms": 2624.1860839998026}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 5, "ready_ms": 1964.940179999985, "first_run_ms": 1238.2683200000884}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 6, "ready_ms": 4029.166294000106, "first_run_ms": 2778.9815470000576}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 6, "ready_ms": 1938.8976089999232, "first_run_ms": 1346.7795110000225}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 7, "ready_ms": 3995.565577999969, "first_run_ms": 2632.801024999935}
-{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 7, "ready_ms": 1923.5287520000384, "first_run_ms": 1303.6884900000132}
-{"kind": "burst", "i": 0, "n": 4, "pool": 2, "ready_ms": 75.21070100006, "first_run_ms": 226.53032299990628}
-{"kind": "burst", "i": 1, "n": 4, "pool": 2, "ready_ms": 79.72922699991614, "first_run_ms": 252.03873300006308}
-{"kind": "burst", "i": 2, "n": 4, "pool": 2, "ready_ms": 3196.6061499999796, "first_run_ms": 3379.5488220000607}
-{"kind": "burst", "i": 3, "n": 4, "pool": 2, "ready_ms": 3417.468162999967, "first_run_ms": 3586.1508369998774}
+{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 0, "ready_ms": 51.81361399991147, "first_run_ms": 234.6966879995307}
+{"kind": "latency", "mode": "warm-claim", "runtime": "kata", "i": 0, "ready_ms": 50.490188999901875, "first_run_ms": 140.77005099898088}
+{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 1, "ready_ms": 68.88083999911032, "first_run_ms": 274.5276339992415}
+{"kind": "latency", "mode": "warm-claim", "runtime": "kata", "i": 1, "ready_ms": 49.015882999810856, "first_run_ms": 138.75207700039027}
+{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 2, "ready_ms": 47.906514000715106, "first_run_ms": 267.22009100012656}
+{"kind": "latency", "mode": "warm-claim", "runtime": "kata", "i": 2, "ready_ms": 86.69005500087223, "first_run_ms": 230.92405799980043}
+{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 3, "ready_ms": 50.840417001381866, "first_run_ms": 296.25340799975675}
+{"kind": "latency", "mode": "warm-claim", "runtime": "kata", "i": 3, "ready_ms": 52.374502000020584, "first_run_ms": 140.72778999980073}
+{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 4, "ready_ms": 47.34966800060647, "first_run_ms": 265.9922010006994}
+{"kind": "latency", "mode": "warm-claim", "runtime": "kata", "i": 4, "ready_ms": 80.3192500006844, "first_run_ms": 165.25754000031156}
+{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 5, "ready_ms": 56.571524999526446, "first_run_ms": 160.57400799945754}
+{"kind": "latency", "mode": "warm-claim", "runtime": "kata", "i": 5, "ready_ms": 76.16953700016893, "first_run_ms": 198.40643300085503}
+{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 6, "ready_ms": 52.61044199869502, "first_run_ms": 265.58791599927645}
+{"kind": "latency", "mode": "warm-claim", "runtime": "kata", "i": 6, "ready_ms": 49.60728300102346, "first_run_ms": 168.4904350004217}
+{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 7, "ready_ms": 47.12996899979771, "first_run_ms": 298.10312100016745}
+{"kind": "latency", "mode": "warm-claim", "runtime": "kata", "i": 7, "ready_ms": 45.956660998854204, "first_run_ms": 142.30200400015747}
+{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 8, "ready_ms": 48.49809000006644, "first_run_ms": 238.31089700070152}
+{"kind": "latency", "mode": "warm-claim", "runtime": "kata", "i": 8, "ready_ms": 47.675906998847495, "first_run_ms": 139.46666799893137}
+{"kind": "latency", "mode": "warm-claim", "runtime": "gvisor", "i": 9, "ready_ms": 48.71599000034621, "first_run_ms": 278.45325700036483}
+{"kind": "latency", "mode": "warm-claim", "runtime": "kata", "i": 9, "ready_ms": 55.374043999108835, "first_run_ms": 149.1798099996231}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 0, "ready_ms": 3768.448613998771, "first_run_ms": 3348.8908290000836}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 0, "ready_ms": 2795.295571000679, "first_run_ms": 1454.5586370004457}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "kata", "i": 0, "ready_ms": 6105.326263999814, "first_run_ms": 4474.597860000358}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 1, "ready_ms": 4052.5662580002972, "first_run_ms": 3049.949715999901}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 1, "ready_ms": 2776.528476999374, "first_run_ms": 1763.169410000046}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "kata", "i": 1, "ready_ms": 5239.294327999232, "first_run_ms": 3803.476885999771}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 2, "ready_ms": 3790.174677998948, "first_run_ms": 3290.7558030001383}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 2, "ready_ms": 2860.558526001114, "first_run_ms": 1521.8120950012235}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "kata", "i": 2, "ready_ms": 5120.167438999488, "first_run_ms": 4174.818396999399}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 3, "ready_ms": 4043.704349998734, "first_run_ms": 3335.2022169983684}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 3, "ready_ms": 2759.346958999231, "first_run_ms": 1574.7173330000805}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "kata", "i": 3, "ready_ms": 4997.629408999273, "first_run_ms": 4288.274753000223}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 4, "ready_ms": 4102.504419000979, "first_run_ms": 2992.497668999931}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 4, "ready_ms": 2849.4959109993943, "first_run_ms": 1638.0199890008953}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "kata", "i": 4, "ready_ms": 5112.540496998918, "first_run_ms": 4218.247393999263}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 5, "ready_ms": 4045.5147059983574, "first_run_ms": 3612.961650998841}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 5, "ready_ms": 2807.0846180016815, "first_run_ms": 1808.4270060007839}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "kata", "i": 5, "ready_ms": 6012.207694999233, "first_run_ms": 5195.160478999242}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 6, "ready_ms": 4030.230014001063, "first_run_ms": 3082.1718830011378}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 6, "ready_ms": 2831.4811300006113, "first_run_ms": 1910.832780000419}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "kata", "i": 6, "ready_ms": 5045.909217000371, "first_run_ms": 4055.916874000104}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "gvisor", "i": 7, "ready_ms": 3991.9031469999027, "first_run_ms": 2840.779723999731}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "runc", "i": 7, "ready_ms": 2803.6186280005495, "first_run_ms": 1465.0629890002165}
+{"kind": "latency", "mode": "cold-sandbox", "runtime": "kata", "i": 7, "ready_ms": 4989.836962000481, "first_run_ms": 4016.2925610002276}
+{"kind": "burst", "i": 0, "n": 4, "pool": 2, "ready_ms": 64.1080619989225, "first_run_ms": 327.4696039989067}
+{"kind": "burst", "i": 1, "n": 4, "pool": 2, "ready_ms": 73.4677450000163, "first_run_ms": 328.3704459990986}
+{"kind": "burst", "i": 2, "n": 4, "pool": 2, "ready_ms": 3434.2167569993762, "first_run_ms": 3607.696491999377}
+{"kind": "burst", "i": 3, "n": 4, "pool": 2, "ready_ms": 4150.541349001287, "first_run_ms": 4320.276133999869}
 {"kind": "runtime", "runtime": "gvisor", "proc_version": "Linux version 4.19.0-gvisor #1 SMP Sun Jan 10 15:06:54 PST 2016", "cpu": "2"}
 {"kind": "runtime", "runtime": "runc", "proc_version": "Linux version 5.15.167.4-microsoft-standard-WSL2 (root@f9c826d3017f) (gcc (GCC) 11.2.0, GNU ld (GNU Binutils) 2.37) #1 SMP Tue Nov 5 00:21:55 UTC 2024", "cpu": "2"}
-{"kind": "overhead", "workload": "empty-run", "runtime": "gvisor", "rep": 0, "seconds": 0.056, "round_trip_s": 0.06202045600002748}
-{"kind": "overhead", "workload": "cpu-python", "runtime": "gvisor", "rep": 0, "seconds": 0.38333868800000026}
-{"kind": "overhead", "workload": "cpu-sha256", "runtime": "gvisor", "rep": 0, "seconds": 0.03521045999999961}
-{"kind": "overhead", "workload": "syscall-getppid", "runtime": "gvisor", "rep": 0, "seconds": 0.07893862399999962}
-{"kind": "overhead", "workload": "file-stat", "runtime": "gvisor", "rep": 0, "seconds": 0.46985815499999983}
-{"kind": "overhead", "workload": "file-small", "runtime": "gvisor", "rep": 0, "seconds": 0.407258959}
-{"kind": "overhead", "workload": "io-write", "runtime": "gvisor", "rep": 0, "seconds": 0.06351369899999959}
-{"kind": "overhead", "workload": "io-read", "runtime": "gvisor", "rep": 0, "seconds": 0.007504769000000522}
-{"kind": "overhead", "workload": "spawn", "runtime": "gvisor", "rep": 0, "seconds": 0.2538932840000001}
-{"kind": "overhead", "workload": "net-loopback", "runtime": "gvisor", "rep": 0, "seconds": 0.1426096439999993}
-{"kind": "overhead", "workload": "empty-run", "runtime": "runc", "rep": 0, "seconds": 0.017, "round_trip_s": 0.0195148100001461}
-{"kind": "overhead", "workload": "cpu-python", "runtime": "runc", "rep": 0, "seconds": 0.23893611199991938}
-{"kind": "overhead", "workload": "cpu-sha256", "runtime": "runc", "rep": 0, "seconds": 0.035342665999905876}
-{"kind": "overhead", "workload": "syscall-getppid", "runtime": "runc", "rep": 0, "seconds": 0.028669973999967624}
-{"kind": "overhead", "workload": "file-stat", "runtime": "runc", "rep": 0, "seconds": 0.10102926900003695}
-{"kind": "overhead", "workload": "file-small", "runtime": "runc", "rep": 0, "seconds": 0.1009614889999284}
-{"kind": "overhead", "workload": "io-write", "runtime": "runc", "rep": 0, "seconds": 0.054289153000127044}
-{"kind": "overhead", "workload": "io-read", "runtime": "runc", "rep": 0, "seconds": 0.0040793099999518745}
-{"kind": "overhead", "workload": "spawn", "runtime": "runc", "rep": 0, "seconds": 0.02489792699998361}
-{"kind": "overhead", "workload": "net-loopback", "runtime": "runc", "rep": 0, "seconds": 0.12034184100002676}
-{"kind": "overhead", "workload": "empty-run", "runtime": "runc", "rep": 1, "seconds": 0.018, "round_trip_s": 0.02088003599988042}
-{"kind": "overhead", "workload": "cpu-python", "runtime": "runc", "rep": 1, "seconds": 0.23842521400001715}
-{"kind": "overhead", "workload": "cpu-sha256", "runtime": "runc", "rep": 1, "seconds": 0.03504384500001834}
-{"kind": "overhead", "workload": "syscall-getppid", "runtime": "runc", "rep": 1, "seconds": 0.029558850000057646}
-{"kind": "overhead", "workload": "file-stat", "runtime": "runc", "rep": 1, "seconds": 0.10222636200001034}
-{"kind": "overhead", "workload": "file-small", "runtime": "runc", "rep": 1, "seconds": 0.09473752500002774}
-{"kind": "overhead", "workload": "io-write", "runtime": "runc", "rep": 1, "seconds": 0.053202170000076876}
-{"kind": "overhead", "workload": "io-read", "runtime": "runc", "rep": 1, "seconds": 0.004333493999865823}
-{"kind": "overhead", "workload": "spawn", "runtime": "runc", "rep": 1, "seconds": 0.02528915999982928}
-{"kind": "overhead", "workload": "net-loopback", "runtime": "runc", "rep": 1, "seconds": 0.11853435099988019}
-{"kind": "overhead", "workload": "empty-run", "runtime": "gvisor", "rep": 1, "seconds": 0.054, "round_trip_s": 0.059516344000030585}
-{"kind": "overhead", "workload": "cpu-python", "runtime": "gvisor", "rep": 1, "seconds": 0.3797995830000005}
-{"kind": "overhead", "workload": "cpu-sha256", "runtime": "gvisor", "rep": 1, "seconds": 0.03503675900000047}
-{"kind": "overhead", "workload": "syscall-getppid", "runtime": "gvisor", "rep": 1, "seconds": 0.08462685900000011}
-{"kind": "overhead", "workload": "file-stat", "runtime": "gvisor", "rep": 1, "seconds": 0.4508075819999995}
-{"kind": "overhead", "workload": "file-small", "runtime": "gvisor", "rep": 1, "seconds": 0.4682002549999993}
-{"kind": "overhead", "workload": "io-write", "runtime": "gvisor", "rep": 1, "seconds": 0.05948572299999988}
-{"kind": "overhead", "workload": "io-read", "runtime": "gvisor", "rep": 1, "seconds": 0.007332032999999072}
-{"kind": "overhead", "workload": "spawn", "runtime": "gvisor", "rep": 1, "seconds": 0.26544005999999953}
-{"kind": "overhead", "workload": "net-loopback", "runtime": "gvisor", "rep": 1, "seconds": 0.1443766929999999}
-{"kind": "overhead", "workload": "empty-run", "runtime": "gvisor", "rep": 2, "seconds": 0.058, "round_trip_s": 0.06420315200011828}
-{"kind": "overhead", "workload": "cpu-python", "runtime": "gvisor", "rep": 2, "seconds": 0.38522226499999945}
-{"kind": "overhead", "workload": "cpu-sha256", "runtime": "gvisor", "rep": 2, "seconds": 0.035351622000000305}
-{"kind": "overhead", "workload": "syscall-getppid", "runtime": "gvisor", "rep": 2, "seconds": 0.08802610000000044}
-{"kind": "overhead", "workload": "file-stat", "runtime": "gvisor", "rep": 2, "seconds": 0.4996370470000002}
-{"kind": "overhead", "workload": "file-small", "runtime": "gvisor", "rep": 2, "seconds": 0.4705270979999998}
-{"kind": "overhead", "workload": "io-write", "runtime": "gvisor", "rep": 2, "seconds": 0.06409275699999917}
-{"kind": "overhead", "workload": "io-read", "runtime": "gvisor", "rep": 2, "seconds": 0.008263445999999064}
-{"kind": "overhead", "workload": "spawn", "runtime": "gvisor", "rep": 2, "seconds": 0.2654595190000002}
-{"kind": "overhead", "workload": "net-loopback", "runtime": "gvisor", "rep": 2, "seconds": 0.15924104900000025}
-{"kind": "overhead", "workload": "empty-run", "runtime": "runc", "rep": 2, "seconds": 0.017, "round_trip_s": 0.020389015000091604}
-{"kind": "overhead", "workload": "cpu-python", "runtime": "runc", "rep": 2, "seconds": 0.2782551410000451}
-{"kind": "overhead", "workload": "cpu-sha256", "runtime": "runc", "rep": 2, "seconds": 0.03728041499994106}
-{"kind": "overhead", "workload": "syscall-getppid", "runtime": "runc", "rep": 2, "seconds": 0.029816582000194103}
-{"kind": "overhead", "workload": "file-stat", "runtime": "runc", "rep": 2, "seconds": 0.10272941799985347}
-{"kind": "overhead", "workload": "file-small", "runtime": "runc", "rep": 2, "seconds": 0.09350921800000833}
-{"kind": "overhead", "workload": "io-write", "runtime": "runc", "rep": 2, "seconds": 0.054618081000171514}
-{"kind": "overhead", "workload": "io-read", "runtime": "runc", "rep": 2, "seconds": 0.004183679999869128}
-{"kind": "overhead", "workload": "spawn", "runtime": "runc", "rep": 2, "seconds": 0.02559987699987687}
-{"kind": "overhead", "workload": "net-loopback", "runtime": "runc", "rep": 2, "seconds": 0.11395167499995296}
-{"kind": "overhead", "workload": "empty-run", "runtime": "runc", "rep": 3, "seconds": 0.018, "round_trip_s": 0.020423181000069235}
-{"kind": "overhead", "workload": "cpu-python", "runtime": "runc", "rep": 3, "seconds": 0.23922687499998574}
-{"kind": "overhead", "workload": "cpu-sha256", "runtime": "runc", "rep": 3, "seconds": 0.03550536199986709}
-{"kind": "overhead", "workload": "syscall-getppid", "runtime": "runc", "rep": 3, "seconds": 0.029304443999990326}
-{"kind": "overhead", "workload": "file-stat", "runtime": "runc", "rep": 3, "seconds": 0.10271265899996251}
-{"kind": "overhead", "workload": "file-small", "runtime": "runc", "rep": 3, "seconds": 0.10016839900004015}
-{"kind": "overhead", "workload": "io-write", "runtime": "runc", "rep": 3, "seconds": 0.058908856000016385}
-{"kind": "overhead", "workload": "io-read", "runtime": "runc", "rep": 3, "seconds": 0.004421878999892215}
-{"kind": "overhead", "workload": "spawn", "runtime": "runc", "rep": 3, "seconds": 0.026585490000115897}
-{"kind": "overhead", "workload": "net-loopback", "runtime": "runc", "rep": 3, "seconds": 0.11790771599999061}
-{"kind": "overhead", "workload": "empty-run", "runtime": "gvisor", "rep": 3, "seconds": 0.057, "round_trip_s": 0.062190753000095356}
-{"kind": "overhead", "workload": "cpu-python", "runtime": "gvisor", "rep": 3, "seconds": 0.38573205000000144}
-{"kind": "overhead", "workload": "cpu-sha256", "runtime": "gvisor", "rep": 3, "seconds": 0.03493806599999871}
-{"kind": "overhead", "workload": "syscall-getppid", "runtime": "gvisor", "rep": 3, "seconds": 0.08090302999999821}
-{"kind": "overhead", "workload": "file-stat", "runtime": "gvisor", "rep": 3, "seconds": 0.45885370299999906}
-{"kind": "overhead", "workload": "file-small", "runtime": "gvisor", "rep": 3, "seconds": 0.4480031800000006}
-{"kind": "overhead", "workload": "io-write", "runtime": "gvisor", "rep": 3, "seconds": 0.05414412000000013}
-{"kind": "overhead", "workload": "io-read", "runtime": "gvisor", "rep": 3, "seconds": 0.008290017000000205}
-{"kind": "overhead", "workload": "spawn", "runtime": "gvisor", "rep": 3, "seconds": 0.2692411849999985}
-{"kind": "overhead", "workload": "net-loopback", "runtime": "gvisor", "rep": 3, "seconds": 0.15027726199999947}
-{"kind": "overhead", "workload": "empty-run", "runtime": "gvisor", "rep": 4, "seconds": 0.094, "round_trip_s": 0.10021733300004598}
-{"kind": "overhead", "workload": "cpu-python", "runtime": "gvisor", "rep": 4, "seconds": 0.384232463}
-{"kind": "overhead", "workload": "cpu-sha256", "runtime": "gvisor", "rep": 4, "seconds": 0.03590154400000145}
-{"kind": "overhead", "workload": "syscall-getppid", "runtime": "gvisor", "rep": 4, "seconds": 0.08444138499999809}
-{"kind": "overhead", "workload": "file-stat", "runtime": "gvisor", "rep": 4, "seconds": 0.4657179159999991}
-{"kind": "overhead", "workload": "file-small", "runtime": "gvisor", "rep": 4, "seconds": 0.4697098559999979}
-{"kind": "overhead", "workload": "io-write", "runtime": "gvisor", "rep": 4, "seconds": 0.0855478899999973}
-{"kind": "overhead", "workload": "io-read", "runtime": "gvisor", "rep": 4, "seconds": 0.007755979999998885}
-{"kind": "overhead", "workload": "spawn", "runtime": "gvisor", "rep": 4, "seconds": 0.2633711219999988}
-{"kind": "overhead", "workload": "net-loopback", "runtime": "gvisor", "rep": 4, "seconds": 0.1411344029999988}
-{"kind": "overhead", "workload": "empty-run", "runtime": "runc", "rep": 4, "seconds": 0.018, "round_trip_s": 0.020634696000115582}
-{"kind": "overhead", "workload": "cpu-python", "runtime": "runc", "rep": 4, "seconds": 0.23760249399992972}
-{"kind": "overhead", "workload": "cpu-sha256", "runtime": "runc", "rep": 4, "seconds": 0.03649464499994792}
-{"kind": "overhead", "workload": "syscall-getppid", "runtime": "runc", "rep": 4, "seconds": 0.029521885000121983}
-{"kind": "overhead", "workload": "file-stat", "runtime": "runc", "rep": 4, "seconds": 0.10117606100016019}
-{"kind": "overhead", "workload": "file-small", "runtime": "runc", "rep": 4, "seconds": 0.0967841059998591}
-{"kind": "overhead", "workload": "io-write", "runtime": "runc", "rep": 4, "seconds": 0.05857222500003445}
-{"kind": "overhead", "workload": "io-read", "runtime": "runc", "rep": 4, "seconds": 0.004078197999888289}
-{"kind": "overhead", "workload": "spawn", "runtime": "runc", "rep": 4, "seconds": 0.025017229000013685}
-{"kind": "overhead", "workload": "net-loopback", "runtime": "runc", "rep": 4, "seconds": 0.12752833700005795}
-{"kind": "overhead", "workload": "empty-run", "runtime": "runc", "rep": 5, "seconds": 0.019, "round_trip_s": 0.021610799999962182}
-{"kind": "overhead", "workload": "cpu-python", "runtime": "runc", "rep": 5, "seconds": 0.2456696809999812}
-{"kind": "overhead", "workload": "cpu-sha256", "runtime": "runc", "rep": 5, "seconds": 0.03493198099999972}
-{"kind": "overhead", "workload": "syscall-getppid", "runtime": "runc", "rep": 5, "seconds": 0.02857581900002515}
-{"kind": "overhead", "workload": "file-stat", "runtime": "runc", "rep": 5, "seconds": 0.10166950500001803}
-{"kind": "overhead", "workload": "file-small", "runtime": "runc", "rep": 5, "seconds": 0.09293269899990264}
-{"kind": "overhead", "workload": "io-write", "runtime": "runc", "rep": 5, "seconds": 0.07013394099999459}
-{"kind": "overhead", "workload": "io-read", "runtime": "runc", "rep": 5, "seconds": 0.004008298999906401}
-{"kind": "overhead", "workload": "spawn", "runtime": "runc", "rep": 5, "seconds": 0.026960872000017844}
-{"kind": "overhead", "workload": "net-loopback", "runtime": "runc", "rep": 5, "seconds": 0.1151574680000067}
-{"kind": "overhead", "workload": "empty-run", "runtime": "gvisor", "rep": 5, "seconds": 0.056, "round_trip_s": 0.06148818599990591}
-{"kind": "overhead", "workload": "cpu-python", "runtime": "gvisor", "rep": 5, "seconds": 0.3856839839999999}
-{"kind": "overhead", "workload": "cpu-sha256", "runtime": "gvisor", "rep": 5, "seconds": 0.03606836200000174}
-{"kind": "overhead", "workload": "syscall-getppid", "runtime": "gvisor", "rep": 5, "seconds": 0.08035531799999873}
-{"kind": "overhead", "workload": "file-stat", "runtime": "gvisor", "rep": 5, "seconds": 0.47265592400000145}
-{"kind": "overhead", "workload": "file-small", "runtime": "gvisor", "rep": 5, "seconds": 0.4447172160000008}
-{"kind": "overhead", "workload": "io-write", "runtime": "gvisor", "rep": 5, "seconds": 0.056110817000000424}
-{"kind": "overhead", "workload": "io-read", "runtime": "gvisor", "rep": 5, "seconds": 0.008305019999998109}
-{"kind": "overhead", "workload": "spawn", "runtime": "gvisor", "rep": 5, "seconds": 0.270149399000001}
-{"kind": "overhead", "workload": "net-loopback", "runtime": "gvisor", "rep": 5, "seconds": 0.14697400700000074}
-{"kind": "overhead", "workload": "empty-run", "runtime": "gvisor", "rep": 6, "seconds": 0.063, "round_trip_s": 0.06912086200009071}
-{"kind": "overhead", "workload": "cpu-python", "runtime": "gvisor", "rep": 6, "seconds": 0.38606043100000065}
-{"kind": "overhead", "workload": "cpu-sha256", "runtime": "gvisor", "rep": 6, "seconds": 0.03529327400000071}
-{"kind": "overhead", "workload": "syscall-getppid", "runtime": "gvisor", "rep": 6, "seconds": 0.08361513200000203}
-{"kind": "overhead", "workload": "file-stat", "runtime": "gvisor", "rep": 6, "seconds": 0.45653823100000324}
-{"kind": "overhead", "workload": "file-small", "runtime": "gvisor", "rep": 6, "seconds": 0.43181048499999974}
-{"kind": "overhead", "workload": "io-write", "runtime": "gvisor", "rep": 6, "seconds": 0.05424943599999921}
-{"kind": "overhead", "workload": "io-read", "runtime": "gvisor", "rep": 6, "seconds": 0.007362564000001015}
-{"kind": "overhead", "workload": "spawn", "runtime": "gvisor", "rep": 6, "seconds": 0.26924051199999965}
-{"kind": "overhead", "workload": "net-loopback", "runtime": "gvisor", "rep": 6, "seconds": 0.15082511899999673}
-{"kind": "overhead", "workload": "empty-run", "runtime": "runc", "rep": 6, "seconds": 0.017, "round_trip_s": 0.020325302000173906}
-{"kind": "overhead", "workload": "cpu-python", "runtime": "runc", "rep": 6, "seconds": 0.23371349900003224}
-{"kind": "overhead", "workload": "cpu-sha256", "runtime": "runc", "rep": 6, "seconds": 0.0354862570000023}
-{"kind": "overhead", "workload": "syscall-getppid", "runtime": "runc", "rep": 6, "seconds": 0.02877669299982699}
-{"kind": "overhead", "workload": "file-stat", "runtime": "runc", "rep": 6, "seconds": 0.10437658599994393}
-{"kind": "overhead", "workload": "file-small", "runtime": "runc", "rep": 6, "seconds": 0.09609117200011497}
-{"kind": "overhead", "workload": "io-write", "runtime": "runc", "rep": 6, "seconds": 0.052946164000104545}
-{"kind": "overhead", "workload": "io-read", "runtime": "runc", "rep": 6, "seconds": 0.003948187000105463}
-{"kind": "overhead", "workload": "spawn", "runtime": "runc", "rep": 6, "seconds": 0.024901294000073904}
-{"kind": "overhead", "workload": "net-loopback", "runtime": "runc", "rep": 6, "seconds": 0.11695101500004057}
-{"kind": "env", "time": "2026-10-04 09:44 UTC", "runsc": "runsc version release-20260928.0", "cpu": "AMD Ryzen 5 5600H with Radeon Graphics", "ncpu": "8", "kernel": "5.15.167.4-microsoft-standard-WSL2"}
+{"kind": "runtime", "runtime": "kata", "proc_version": "Linux version 6.18.35 (@540110ce73d4) (gcc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0, GNU ld (GNU Binutils for Ubuntu) 2.38) #1 SMP Tue Sep 15 07:34:33 UTC 2026", "cpu": "2"}
+{"kind": "overhead", "workload": "empty-run", "runtime": "gvisor", "rep": 0, "seconds": 0.099, "round_trip_s": 0.10601717099962116}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "gvisor", "rep": 0, "seconds": 0.5148561749999994}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "gvisor", "rep": 0, "seconds": 0.03726956299999973}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "gvisor", "rep": 0, "seconds": 0.08919021700000052}
+{"kind": "overhead", "workload": "file-stat", "runtime": "gvisor", "rep": 0, "seconds": 0.5918215050000004}
+{"kind": "overhead", "workload": "file-small", "runtime": "gvisor", "rep": 0, "seconds": 0.45874735599999994}
+{"kind": "overhead", "workload": "io-write", "runtime": "gvisor", "rep": 0, "seconds": 0.10501774199999936}
+{"kind": "overhead", "workload": "io-read", "runtime": "gvisor", "rep": 0, "seconds": 0.026446750999999935}
+{"kind": "overhead", "workload": "spawn", "runtime": "gvisor", "rep": 0, "seconds": 0.2956494979999995}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "gvisor", "rep": 0, "seconds": 0.16226075900000048}
+{"kind": "overhead", "workload": "empty-run", "runtime": "runc", "rep": 0, "seconds": 0.034, "round_trip_s": 0.03719551599897386}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "runc", "rep": 0, "seconds": 0.24539764299879607}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "runc", "rep": 0, "seconds": 0.036581749000106356}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "runc", "rep": 0, "seconds": 0.029599023999253404}
+{"kind": "overhead", "workload": "file-stat", "runtime": "runc", "rep": 0, "seconds": 0.10476187300082529}
+{"kind": "overhead", "workload": "file-small", "runtime": "runc", "rep": 0, "seconds": 0.10200618100134307}
+{"kind": "overhead", "workload": "io-write", "runtime": "runc", "rep": 0, "seconds": 0.24183491799885815}
+{"kind": "overhead", "workload": "io-read", "runtime": "runc", "rep": 0, "seconds": 0.014735952001501573}
+{"kind": "overhead", "workload": "spawn", "runtime": "runc", "rep": 0, "seconds": 0.029355922999457107}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "runc", "rep": 0, "seconds": 0.13860348600064754}
+{"kind": "overhead", "workload": "empty-run", "runtime": "kata", "rep": 0, "seconds": 0.098, "round_trip_s": 0.11286443099925236}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "kata", "rep": 0, "seconds": 0.2767451250000006}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "kata", "rep": 0, "seconds": 0.03543322599999943}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "kata", "rep": 0, "seconds": 0.012304067999999724}
+{"kind": "overhead", "workload": "file-stat", "runtime": "kata", "rep": 0, "seconds": 0.05304213099999977}
+{"kind": "overhead", "workload": "file-small", "runtime": "kata", "rep": 0, "seconds": 1.9342268669999996}
+{"kind": "overhead", "workload": "io-write", "runtime": "kata", "rep": 0, "seconds": 0.18706272000000013}
+{"kind": "overhead", "workload": "io-read", "runtime": "kata", "rep": 0, "seconds": 0.03822611000000009}
+{"kind": "overhead", "workload": "spawn", "runtime": "kata", "rep": 0, "seconds": 0.3472108709999997}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "kata", "rep": 0, "seconds": 0.03998315900000016}
+{"kind": "overhead", "workload": "empty-run", "runtime": "runc", "rep": 1, "seconds": 0.023, "round_trip_s": 0.026629709000189905}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "runc", "rep": 1, "seconds": 0.24430690500048513}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "runc", "rep": 1, "seconds": 0.03643710899996222}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "runc", "rep": 1, "seconds": 0.02990412200051651}
+{"kind": "overhead", "workload": "file-stat", "runtime": "runc", "rep": 1, "seconds": 0.10694305499964685}
+{"kind": "overhead", "workload": "file-small", "runtime": "runc", "rep": 1, "seconds": 0.10479555100027937}
+{"kind": "overhead", "workload": "io-write", "runtime": "runc", "rep": 1, "seconds": 0.08126652399914747}
+{"kind": "overhead", "workload": "io-read", "runtime": "runc", "rep": 1, "seconds": 0.004108637000172166}
+{"kind": "overhead", "workload": "spawn", "runtime": "runc", "rep": 1, "seconds": 0.028123039999627508}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "runc", "rep": 1, "seconds": 0.12588000299911073}
+{"kind": "overhead", "workload": "empty-run", "runtime": "kata", "rep": 1, "seconds": 0.073, "round_trip_s": 0.08525620300133596}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "kata", "rep": 1, "seconds": 0.2444748850000007}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "kata", "rep": 1, "seconds": 0.03683030899999906}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "kata", "rep": 1, "seconds": 0.011928830000000445}
+{"kind": "overhead", "workload": "file-stat", "runtime": "kata", "rep": 1, "seconds": 0.05585829199999992}
+{"kind": "overhead", "workload": "file-small", "runtime": "kata", "rep": 1, "seconds": 1.9293932099999989}
+{"kind": "overhead", "workload": "io-write", "runtime": "kata", "rep": 1, "seconds": 0.21477231599999946}
+{"kind": "overhead", "workload": "io-read", "runtime": "kata", "rep": 1, "seconds": 0.017364173000000704}
+{"kind": "overhead", "workload": "spawn", "runtime": "kata", "rep": 1, "seconds": 0.26883391799999856}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "kata", "rep": 1, "seconds": 0.041330579000000256}
+{"kind": "overhead", "workload": "empty-run", "runtime": "gvisor", "rep": 1, "seconds": 0.093, "round_trip_s": 0.10050801200122805}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "gvisor", "rep": 1, "seconds": 0.4035788730000007}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "gvisor", "rep": 1, "seconds": 0.03750037100000014}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "gvisor", "rep": 1, "seconds": 0.09171922899999885}
+{"kind": "overhead", "workload": "file-stat", "runtime": "gvisor", "rep": 1, "seconds": 0.5141404839999986}
+{"kind": "overhead", "workload": "file-small", "runtime": "gvisor", "rep": 1, "seconds": 0.4615267759999995}
+{"kind": "overhead", "workload": "io-write", "runtime": "gvisor", "rep": 1, "seconds": 0.09454656499999814}
+{"kind": "overhead", "workload": "io-read", "runtime": "gvisor", "rep": 1, "seconds": 0.010150425999999158}
+{"kind": "overhead", "workload": "spawn", "runtime": "gvisor", "rep": 1, "seconds": 0.273730582999999}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "gvisor", "rep": 1, "seconds": 0.14709995100000128}
+{"kind": "overhead", "workload": "empty-run", "runtime": "kata", "rep": 2, "seconds": 0.07, "round_trip_s": 0.0804644849995384}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "kata", "rep": 2, "seconds": 0.23654491800000343}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "kata", "rep": 2, "seconds": 0.037112374000003}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "kata", "rep": 2, "seconds": 0.013000720999997384}
+{"kind": "overhead", "workload": "file-stat", "runtime": "kata", "rep": 2, "seconds": 0.06095782200000244}
+{"kind": "overhead", "workload": "file-small", "runtime": "kata", "rep": 2, "seconds": 2.054022247999999}
+{"kind": "overhead", "workload": "io-write", "runtime": "kata", "rep": 2, "seconds": 0.09647084499999892}
+{"kind": "overhead", "workload": "io-read", "runtime": "kata", "rep": 2, "seconds": 0.01798840900000087}
+{"kind": "overhead", "workload": "spawn", "runtime": "kata", "rep": 2, "seconds": 0.3534678860000007}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "kata", "rep": 2, "seconds": 0.045958433000002685}
+{"kind": "overhead", "workload": "empty-run", "runtime": "gvisor", "rep": 2, "seconds": 0.092, "round_trip_s": 0.09815141199942445}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "gvisor", "rep": 2, "seconds": 0.4131763279999987}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "gvisor", "rep": 2, "seconds": 0.03896986099999822}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "gvisor", "rep": 2, "seconds": 0.08147270799999973}
+{"kind": "overhead", "workload": "file-stat", "runtime": "gvisor", "rep": 2, "seconds": 0.5276193359999972}
+{"kind": "overhead", "workload": "file-small", "runtime": "gvisor", "rep": 2, "seconds": 0.4673585249999981}
+{"kind": "overhead", "workload": "io-write", "runtime": "gvisor", "rep": 2, "seconds": 0.16210784099999742}
+{"kind": "overhead", "workload": "io-read", "runtime": "gvisor", "rep": 2, "seconds": 0.008426701000001202}
+{"kind": "overhead", "workload": "spawn", "runtime": "gvisor", "rep": 2, "seconds": 0.34308730000000054}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "gvisor", "rep": 2, "seconds": 0.15260935799999942}
+{"kind": "overhead", "workload": "empty-run", "runtime": "runc", "rep": 2, "seconds": 0.035, "round_trip_s": 0.03772739300075045}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "runc", "rep": 2, "seconds": 0.2587746799999877}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "runc", "rep": 2, "seconds": 0.03820321000057447}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "runc", "rep": 2, "seconds": 0.031136458999753813}
+{"kind": "overhead", "workload": "file-stat", "runtime": "runc", "rep": 2, "seconds": 0.10999256600007357}
+{"kind": "overhead", "workload": "file-small", "runtime": "runc", "rep": 2, "seconds": 0.09569209999972372}
+{"kind": "overhead", "workload": "io-write", "runtime": "runc", "rep": 2, "seconds": 0.10906168600013189}
+{"kind": "overhead", "workload": "io-read", "runtime": "runc", "rep": 2, "seconds": 0.00641234899921983}
+{"kind": "overhead", "workload": "spawn", "runtime": "runc", "rep": 2, "seconds": 0.02618852399973548}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "runc", "rep": 2, "seconds": 0.12225970100007544}
+{"kind": "overhead", "workload": "empty-run", "runtime": "gvisor", "rep": 3, "seconds": 0.06, "round_trip_s": 0.06577686200034805}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "gvisor", "rep": 3, "seconds": 0.4018544979999987}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "gvisor", "rep": 3, "seconds": 0.03669769799999756}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "gvisor", "rep": 3, "seconds": 0.08319872300000242}
+{"kind": "overhead", "workload": "file-stat", "runtime": "gvisor", "rep": 3, "seconds": 0.4660775129999948}
+{"kind": "overhead", "workload": "file-small", "runtime": "gvisor", "rep": 3, "seconds": 0.4660945500000011}
+{"kind": "overhead", "workload": "io-write", "runtime": "gvisor", "rep": 3, "seconds": 0.07418971199999902}
+{"kind": "overhead", "workload": "io-read", "runtime": "gvisor", "rep": 3, "seconds": 0.00911832999999973}
+{"kind": "overhead", "workload": "spawn", "runtime": "gvisor", "rep": 3, "seconds": 0.2729317590000022}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "gvisor", "rep": 3, "seconds": 0.1364135120000043}
+{"kind": "overhead", "workload": "empty-run", "runtime": "runc", "rep": 3, "seconds": 0.018, "round_trip_s": 0.021127121000972693}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "runc", "rep": 3, "seconds": 0.2563223609995475}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "runc", "rep": 3, "seconds": 0.03633129099944199}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "runc", "rep": 3, "seconds": 0.02947709700129053}
+{"kind": "overhead", "workload": "file-stat", "runtime": "runc", "rep": 3, "seconds": 0.1045199500003946}
+{"kind": "overhead", "workload": "file-small", "runtime": "runc", "rep": 3, "seconds": 0.09416359899842064}
+{"kind": "overhead", "workload": "io-write", "runtime": "runc", "rep": 3, "seconds": 0.062394141999902786}
+{"kind": "overhead", "workload": "io-read", "runtime": "runc", "rep": 3, "seconds": 0.0043688229998224415}
+{"kind": "overhead", "workload": "spawn", "runtime": "runc", "rep": 3, "seconds": 0.027113785999972606}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "runc", "rep": 3, "seconds": 0.12129187000027741}
+{"kind": "overhead", "workload": "empty-run", "runtime": "kata", "rep": 3, "seconds": 0.072, "round_trip_s": 0.0839942959992186}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "kata", "rep": 3, "seconds": 0.23381578000000047}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "kata", "rep": 3, "seconds": 0.03619825300000201}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "kata", "rep": 3, "seconds": 0.012923741000001598}
+{"kind": "overhead", "workload": "file-stat", "runtime": "kata", "rep": 3, "seconds": 0.05401742499999784}
+{"kind": "overhead", "workload": "file-small", "runtime": "kata", "rep": 3, "seconds": 1.907329781999998}
+{"kind": "overhead", "workload": "io-write", "runtime": "kata", "rep": 3, "seconds": 0.0788926979999971}
+{"kind": "overhead", "workload": "io-read", "runtime": "kata", "rep": 3, "seconds": 0.02232643600000017}
+{"kind": "overhead", "workload": "spawn", "runtime": "kata", "rep": 3, "seconds": 0.2993401549999959}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "kata", "rep": 3, "seconds": 0.03766713899999985}
+{"kind": "overhead", "workload": "empty-run", "runtime": "runc", "rep": 4, "seconds": 0.018, "round_trip_s": 0.020620762999897124}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "runc", "rep": 4, "seconds": 0.260310997000488}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "runc", "rep": 4, "seconds": 0.03616700199927436}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "runc", "rep": 4, "seconds": 0.030791794999458943}
+{"kind": "overhead", "workload": "file-stat", "runtime": "runc", "rep": 4, "seconds": 0.11223586199957936}
+{"kind": "overhead", "workload": "file-small", "runtime": "runc", "rep": 4, "seconds": 0.09633967999980086}
+{"kind": "overhead", "workload": "io-write", "runtime": "runc", "rep": 4, "seconds": 0.11318496700005198}
+{"kind": "overhead", "workload": "io-read", "runtime": "runc", "rep": 4, "seconds": 0.004627582000466646}
+{"kind": "overhead", "workload": "spawn", "runtime": "runc", "rep": 4, "seconds": 0.026061277001645067}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "runc", "rep": 4, "seconds": 0.1352345939994848}
+{"kind": "overhead", "workload": "empty-run", "runtime": "kata", "rep": 4, "seconds": 0.071, "round_trip_s": 0.08270854799957306}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "kata", "rep": 4, "seconds": 0.24401199000000418}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "kata", "rep": 4, "seconds": 0.03471538099999805}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "kata", "rep": 4, "seconds": 0.011750322000004587}
+{"kind": "overhead", "workload": "file-stat", "runtime": "kata", "rep": 4, "seconds": 0.05435655899999858}
+{"kind": "overhead", "workload": "file-small", "runtime": "kata", "rep": 4, "seconds": 1.747168477999999}
+{"kind": "overhead", "workload": "io-write", "runtime": "kata", "rep": 4, "seconds": 0.09947925800000235}
+{"kind": "overhead", "workload": "io-read", "runtime": "kata", "rep": 4, "seconds": 0.027119792999997117}
+{"kind": "overhead", "workload": "spawn", "runtime": "kata", "rep": 4, "seconds": 0.2822999079999988}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "kata", "rep": 4, "seconds": 0.0419754449999985}
+{"kind": "overhead", "workload": "empty-run", "runtime": "gvisor", "rep": 4, "seconds": 0.089, "round_trip_s": 0.09527222100041399}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "gvisor", "rep": 4, "seconds": 0.4015822220000018}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "gvisor", "rep": 4, "seconds": 0.03675373499999779}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "gvisor", "rep": 4, "seconds": 0.08200582300000292}
+{"kind": "overhead", "workload": "file-stat", "runtime": "gvisor", "rep": 4, "seconds": 0.5043440430000032}
+{"kind": "overhead", "workload": "file-small", "runtime": "gvisor", "rep": 4, "seconds": 0.4558398490000002}
+{"kind": "overhead", "workload": "io-write", "runtime": "gvisor", "rep": 4, "seconds": 0.060231084999998075}
+{"kind": "overhead", "workload": "io-read", "runtime": "gvisor", "rep": 4, "seconds": 0.008627876000005585}
+{"kind": "overhead", "workload": "spawn", "runtime": "gvisor", "rep": 4, "seconds": 0.28252235800000136}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "gvisor", "rep": 4, "seconds": 0.1433589270000013}
+{"kind": "overhead", "workload": "empty-run", "runtime": "kata", "rep": 5, "seconds": 0.073, "round_trip_s": 0.08646870300071896}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "kata", "rep": 5, "seconds": 0.237591780999999}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "kata", "rep": 5, "seconds": 0.036026677000002394}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "kata", "rep": 5, "seconds": 0.012506753000003812}
+{"kind": "overhead", "workload": "file-stat", "runtime": "kata", "rep": 5, "seconds": 0.05559417099999564}
+{"kind": "overhead", "workload": "file-small", "runtime": "kata", "rep": 5, "seconds": 1.9068534789999987}
+{"kind": "overhead", "workload": "io-write", "runtime": "kata", "rep": 5, "seconds": 0.08661130500000525}
+{"kind": "overhead", "workload": "io-read", "runtime": "kata", "rep": 5, "seconds": 0.0217989799999998}
+{"kind": "overhead", "workload": "spawn", "runtime": "kata", "rep": 5, "seconds": 0.2967862380000028}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "kata", "rep": 5, "seconds": 0.03912950800000203}
+{"kind": "overhead", "workload": "empty-run", "runtime": "gvisor", "rep": 5, "seconds": 0.092, "round_trip_s": 0.09917751200009661}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "gvisor", "rep": 5, "seconds": 0.40389280800000193}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "gvisor", "rep": 5, "seconds": 0.036167854999995086}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "gvisor", "rep": 5, "seconds": 0.08714109099999945}
+{"kind": "overhead", "workload": "file-stat", "runtime": "gvisor", "rep": 5, "seconds": 0.5891426399999986}
+{"kind": "overhead", "workload": "file-small", "runtime": "gvisor", "rep": 5, "seconds": 0.485143414999996}
+{"kind": "overhead", "workload": "io-write", "runtime": "gvisor", "rep": 5, "seconds": 0.07610013800000104}
+{"kind": "overhead", "workload": "io-read", "runtime": "gvisor", "rep": 5, "seconds": 0.008331018999996331}
+{"kind": "overhead", "workload": "spawn", "runtime": "gvisor", "rep": 5, "seconds": 0.2852510319999979}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "gvisor", "rep": 5, "seconds": 0.16073803300000122}
+{"kind": "overhead", "workload": "empty-run", "runtime": "runc", "rep": 5, "seconds": 0.018, "round_trip_s": 0.02105927699994936}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "runc", "rep": 5, "seconds": 0.25227241099855746}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "runc", "rep": 5, "seconds": 0.03602641100042092}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "runc", "rep": 5, "seconds": 0.029900528001235216}
+{"kind": "overhead", "workload": "file-stat", "runtime": "runc", "rep": 5, "seconds": 0.1037113499987754}
+{"kind": "overhead", "workload": "file-small", "runtime": "runc", "rep": 5, "seconds": 0.09531594599866366}
+{"kind": "overhead", "workload": "io-write", "runtime": "runc", "rep": 5, "seconds": 0.05664421400069841}
+{"kind": "overhead", "workload": "io-read", "runtime": "runc", "rep": 5, "seconds": 0.005054200999438763}
+{"kind": "overhead", "workload": "spawn", "runtime": "runc", "rep": 5, "seconds": 0.02748699399853649}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "runc", "rep": 5, "seconds": 0.12440795000111393}
+{"kind": "overhead", "workload": "empty-run", "runtime": "gvisor", "rep": 6, "seconds": 0.09, "round_trip_s": 0.09669267399840464}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "gvisor", "rep": 6, "seconds": 0.40378418899999957}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "gvisor", "rep": 6, "seconds": 0.036663809000003766}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "gvisor", "rep": 6, "seconds": 0.08315476099999586}
+{"kind": "overhead", "workload": "file-stat", "runtime": "gvisor", "rep": 6, "seconds": 0.5448222789999946}
+{"kind": "overhead", "workload": "file-small", "runtime": "gvisor", "rep": 6, "seconds": 0.49250606699999366}
+{"kind": "overhead", "workload": "io-write", "runtime": "gvisor", "rep": 6, "seconds": 0.06304048300000176}
+{"kind": "overhead", "workload": "io-read", "runtime": "gvisor", "rep": 6, "seconds": 0.0098276040000016}
+{"kind": "overhead", "workload": "spawn", "runtime": "gvisor", "rep": 6, "seconds": 0.30009055899999737}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "gvisor", "rep": 6, "seconds": 0.14768577099999902}
+{"kind": "overhead", "workload": "empty-run", "runtime": "runc", "rep": 6, "seconds": 0.018, "round_trip_s": 0.020633984000596683}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "runc", "rep": 6, "seconds": 0.24135408799884317}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "runc", "rep": 6, "seconds": 0.036155480998786516}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "runc", "rep": 6, "seconds": 0.03017443499993533}
+{"kind": "overhead", "workload": "file-stat", "runtime": "runc", "rep": 6, "seconds": 0.10683492299904174}
+{"kind": "overhead", "workload": "file-small", "runtime": "runc", "rep": 6, "seconds": 0.12725914499969804}
+{"kind": "overhead", "workload": "io-write", "runtime": "runc", "rep": 6, "seconds": 0.07227625400082616}
+{"kind": "overhead", "workload": "io-read", "runtime": "runc", "rep": 6, "seconds": 0.004216478000671486}
+{"kind": "overhead", "workload": "spawn", "runtime": "runc", "rep": 6, "seconds": 0.031323699999120436}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "runc", "rep": 6, "seconds": 0.13082686199959426}
+{"kind": "overhead", "workload": "empty-run", "runtime": "kata", "rep": 6, "seconds": 0.073, "round_trip_s": 0.08679804100029287}
+{"kind": "overhead", "workload": "cpu-python", "runtime": "kata", "rep": 6, "seconds": 0.22880397499999816}
+{"kind": "overhead", "workload": "cpu-sha256", "runtime": "kata", "rep": 6, "seconds": 0.03577265399999874}
+{"kind": "overhead", "workload": "syscall-getppid", "runtime": "kata", "rep": 6, "seconds": 0.012422962999998788}
+{"kind": "overhead", "workload": "file-stat", "runtime": "kata", "rep": 6, "seconds": 0.05488323399999473}
+{"kind": "overhead", "workload": "file-small", "runtime": "kata", "rep": 6, "seconds": 1.9115518469999984}
+{"kind": "overhead", "workload": "io-write", "runtime": "kata", "rep": 6, "seconds": 0.12120779800000037}
+{"kind": "overhead", "workload": "io-read", "runtime": "kata", "rep": 6, "seconds": 0.02032137199999795}
+{"kind": "overhead", "workload": "spawn", "runtime": "kata", "rep": 6, "seconds": 0.2715107729999957}
+{"kind": "overhead", "workload": "net-loopback", "runtime": "kata", "rep": 6, "seconds": 0.048409569000000374}
+{"kind": "env", "time": "2026-10-04 12:37 UTC", "runsc": "runsc version release-20260928.0", "cpu": "AMD Ryzen 5 5600H with Radeon Graphics", "ncpu": "8", "kernel": "5.15.167.4-microsoft-standard-WSL2"}

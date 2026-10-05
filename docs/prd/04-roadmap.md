@@ -31,7 +31,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 4. **Done.** Attack demos: fork and memory bombs, credential hunt, persistence, TCP egress, DNS exfiltration, ICMP; each shows the stopping layer (`make attack-demos`).
 5. **Done.** Benchmarks: cold sandbox vs warm-pool claim; runc vs gVisor overhead (CPU, syscall-heavy, I/O) (`make bench`).
 6. **Done.** DNS-scoped egress for tasks that need it (Cilium `toFQDNs`, DNS proxy, SNI pin) (`make test-egress`). Domain fronting remains open (P1-13).
-7. **Next.** Kata Containers comparison on bare metal.
+7. **Done.** Kata Containers comparison, on WSL2 through nested KVM with Cloud Hypervisor (`make kata`, `verify-kata`, `attack-demos-kata`, `bench`). Bare-metal numbers remain optional.
+8. **Next.** P1 wrap-up: close the remaining **Must** items still *Partial*: P1-04 (test Pod Security `restricted` enforcement) and P1-44 (claim released on the error path). Then phase 1's exit criteria are met.
 
 ### P2: approval gate
 1. `ChangeRequest` CRD with immutable spec, status-subresource approval, and the controller (kubebuilder).
@@ -88,5 +89,5 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 | Kyverno vs OPA Gatekeeper vs plain ValidatingAdmissionPolicy for the action gate | P3 M4 |
 | SPIFFE/SPIRE vs projected SA tokens for workload identity | P3 M1 |
 | Does the NVIDIA device plugin work on WSL2's `/dev/dxg` with k3s? | P5 M2 |
-| The kind node sees `/dev/kvm` (nested virtualisation under WSL2). Does gVisor's KVM platform, or Kata, work there, and how does it compare with systrap? | P1 M7 |
+| ~~The kind node sees `/dev/kvm`. Does Kata work there?~~ Yes, with Cloud Hypervisor (QEMU needs `vhost_vsock`, absent from the WSL2 kernel). gVisor's KVM platform is untried. | Resolved (P1 M7) |
 | Which hosted model for the agent loop, and its cost budget | P3 M2 |

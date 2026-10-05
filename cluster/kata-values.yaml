@@ -1,0 +1,49 @@
+# Kata Containers via the upstream kata-deploy chart (make kata), with Cloud
+# Hypervisor only. The stock WSL2 kernel has KVM (nested, AMD SVM) but no
+# CONFIG_VHOST_VSOCK, which QEMU needs to talk to the guest agent; Cloud
+# Hypervisor implements vsock in the VMM ("hybrid vsock") over a Unix socket.
+# Dragonball (runtime-rs) also uses hybrid vsock, but it moves itself into
+# the pod's cgroup through systemd over D-Bus, and kind's node runs no D-Bus:
+# sandbox creation fails with "systemd dbus error ... No such file".
+#
+# Red-flag scan note: kata-deploy runs a privileged DaemonSet with hostPath
+# mounts. It is a node installer (writes /opt/kata and containerd's config,
+# then restarts containerd), like the gVisor extraMounts in kind-gvisor.yaml.
+# No workload pod gets these privileges.
+shims:
+  disableAll: true
+  clh:
+    enabled: true
+    # Kata's config.d overrides (50-user-overrides.toml).
+    dropIn: |
+      [runtime]
+      # Default true: the pod's seccomp profile (RuntimeDefault) is not
+      # applied inside the guest, so user code reaches every syscall of the
+      # guest kernel. The VM is the boundary; this restores the inner layer.
+      disable_guest_seccomp = false
+      # Default false: the VMM ran in a cgroup at the root of the hierarchy
+      # (kind's systemd-style cgroup path created literally), outside the
+      # pod's cgroup and kubelet.slice: no memory, CPU, pids or swap limit on
+      # the VM, and the pod's own cgroup sat empty. True puts the whole
+      # sandbox in the pod's cgroup.
+      sandbox_cgroup_only = true
+      [hypervisor.clh]
+      # Default allows the kernel_params annotation, so whoever sets pod
+      # annotations can change the guest kernel's command line.
+      enable_annotations = []
+      # The VM gets this base memory plus the container limit, hot-plugged.
+      # Default 2048: with sandbox_cgroup_only the pod cgroup (limit +
+      # overhead) is far smaller than the VM, the guest never feels memory
+      # pressure, and the host OOM-kills the whole VM. Size the base to fit
+      # the RuntimeClass overhead below.
+      default_memory = 256
+    runtimeClass:
+      overhead:
+        # Base VM memory (256 MiB) plus VMM and virtiofsd headroom.
+        memory: "320Mi"
+        cpu: "250m"
+defaultShim:
+  amd64: clh
+snapshotter:
+  setup: []
+imagePullPolicy: IfNotPresent

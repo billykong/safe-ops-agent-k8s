@@ -2,7 +2,8 @@
 agent's network policy applies: API server and sandbox port 8888 only).
 Prints one JSON line per sample.
 
-Usage: bench_client.py WARM_SAMPLES COLD_SAMPLES OVERHEAD_REPS BURST
+Usage: bench_client.py WARM_SAMPLES COLD_SAMPLES OVERHEAD_REPS BURST [RUNTIMES]
+RUNTIMES is a comma-separated subset of gvisor,runc,kata (default gvisor,runc).
 
 1. Startup latency, from creating the object to the first successful run:
    - warm: a SandboxClaim on the warm pool (what the agent does)
@@ -37,6 +38,10 @@ SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
 API = f"https://{os.environ['KUBERNETES_SERVICE_HOST']}:{os.environ['KUBERNETES_SERVICE_PORT']}"
 NS = "sandboxes"
 POOL = "python-gvisor"
+# Warm pool (and template) per sandboxed runtime. runc has no pool: its
+# sandboxes are the gVisor template with runtimeClassName removed.
+POOLS = {"gvisor": "python-gvisor", "kata": "python-kata"}
+RUNTIMES = ["gvisor", "runc"]
 EXT = f"{API}/apis/extensions.agents.x-k8s.io/v1beta1/namespaces/{NS}"
 CORE = f"{API}/apis/agents.x-k8s.io/v1beta1/namespaces/{NS}"
 POLL_S = 0.02
@@ -102,27 +107,35 @@ def wait_gone(url, timeout_s=120):
         time.sleep(0.5)
 
 
+def pool_full(name):
+    pool = k8s("GET", f"{EXT}/sandboxwarmpools/{name}")
+    want = pool["spec"]["replicas"]
+    st = pool.get("status", {})
+    return st.get("readyReplicas") == want and st.get("replicas") == want
+
+
 def wait_pool_full(timeout_s=180):
+    """Wait until every pool in use is full, so refills don't overlap a sample."""
+    pools = [POOLS[rt] for rt in RUNTIMES if rt in POOLS]
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        pool = k8s("GET", f"{EXT}/sandboxwarmpools/{POOL}")
-        want = pool["spec"]["replicas"]
-        st = pool.get("status", {})
-        if st.get("readyReplicas") == want and st.get("replicas") == want:
-            time.sleep(2)  # let the last refill settle so it doesn't overlap the next sample
+        if all(pool_full(p) for p in pools):
+            time.sleep(2)  # let the last refill settle
             return
         time.sleep(0.5)
-    raise TimeoutError("warm pool did not refill")
+    raise TimeoutError("warm pools did not refill")
 
 
 def pod_template(runtime, cpu=None):
-    tmpl = k8s("GET", f"{EXT}/sandboxtemplates/{POOL}")
+    tmpl = k8s("GET", f"{EXT}/sandboxtemplates/{POOLS.get(runtime, POOL)}")
     pt = copy.deepcopy(tmpl["spec"]["podTemplate"])
     if runtime == "runc":
         pt["spec"].pop("runtimeClassName", None)
     if cpu:
         for c in pt["spec"]["containers"]:
-            c["resources"]["limits"]["cpu"] = c["resources"]["requests"]["cpu"] = cpu
+            # Limit only: requesting 2 CPUs for each of three sandboxes
+            # doesn't fit a single 8-CPU node with everything else.
+            c["resources"]["limits"]["cpu"] = cpu
     return pt
 
 
@@ -161,13 +174,13 @@ def time_cold(name, runtime):
     return (t_ready - t0) * 1000, (t_run - t0) * 1000
 
 
-def time_warm(name):
+def time_warm(name, pool=POOL):
     url = f"{EXT}/sandboxclaims/{name}"
     t0 = time.monotonic()
     k8s("POST", f"{EXT}/sandboxclaims", {
         "apiVersion": "extensions.agents.x-k8s.io/v1beta1", "kind": "SandboxClaim",
         "metadata": {"name": name},
-        "spec": {"warmPoolRef": {"name": POOL},
+        "spec": {"warmPoolRef": {"name": pool},
                  "lifecycle": {"shutdownTime": shutdown_time(), "shutdownPolicy": "Delete"}},
     })
     while True:
@@ -282,7 +295,7 @@ OVERHEAD_CPU = "2"
 
 def overhead(reps):
     ips = {}
-    for rt in ("gvisor", "runc"):
+    for rt in RUNTIMES:
         name = f"bench-overhead-{rt}"
         create_sandbox(name, rt, OVERHEAD_CPU)
         url = f"{CORE}/sandboxes/{name}"
@@ -301,8 +314,8 @@ def overhead(reps):
         run(ip, "pass")  # warm the interpreter's page cache before timing
 
     for rep in range(reps):
-        # Alternate which runtime goes first, so drift hits both equally.
-        order = ["gvisor", "runc"] if rep % 2 == 0 else ["runc", "gvisor"]
+        # Rotate which runtime goes first, so drift hits all of them equally.
+        order = RUNTIMES[rep % len(RUNTIMES):] + RUNTIMES[:rep % len(RUNTIMES)]
         for rt in order:
             # Interpreter start-up and the agent's round trip for an empty run.
             t = time.monotonic()
@@ -332,15 +345,19 @@ def burst(n):
 
 
 def main():
+    global RUNTIMES
     warm_n, cold_n, reps, burst_n = map(int, sys.argv[1:5])
+    if len(sys.argv) > 5:
+        RUNTIMES = sys.argv[5].split(",")
     emit(kind="workloads", items=[{"id": w, "desc": d} for w, d, _ in WORKLOADS])
     stamp = int(time.time())
     for i in range(warm_n):
-        wait_pool_full()
-        r, f = time_warm(f"bench-warm-{stamp}-{i}")
-        emit(kind="latency", mode="warm-claim", runtime="gvisor", i=i, ready_ms=r, first_run_ms=f)
+        for rt in (rt for rt in RUNTIMES if rt in POOLS):
+            wait_pool_full()
+            r, f = time_warm(f"bench-warm-{rt}-{stamp}-{i}", POOLS[rt])
+            emit(kind="latency", mode="warm-claim", runtime=rt, i=i, ready_ms=r, first_run_ms=f)
     for i in range(cold_n):
-        for rt in ("gvisor", "runc"):
+        for rt in RUNTIMES:
             wait_pool_full()
             r, f = time_cold(f"bench-cold-{rt}-{stamp}-{i}", rt)
             emit(kind="latency", mode="cold-sandbox", runtime=rt, i=i, ready_ms=r, first_run_ms=f)

@@ -1,16 +1,26 @@
 SANDBOX_VERSION ?= v1.0.4
 CILIUM_VERSION  ?= 1.20.2
+KATA_VERSION    ?= 4.2.0
 CLUSTER         ?= safe-ops
+CLIENT_IMAGE    := python:3.13-slim
 P1              := projects/01-sandboxed-code-exec
 # Always target this cluster, never whatever context is current: creating
 # another kind cluster switches the current context to it.
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: up down node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress
+.PHONY: client-image up down node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata
 
 up:
-	kind create cluster --config cluster/kind-gvisor.yaml
+	# kind makes a new cluster's context current, which retargets every bare
+	# kubectl of other projects and sessions (finding 17 in the P1 README).
+	# Write its kubeconfig to a separate file, then merge it in without
+	# touching current-context (the first file in KUBECONFIG wins).
+	set -e; tmp=$$(mktemp -d); trap 'rm -rf $$tmp' EXIT; mkdir -p $$HOME/.kube; touch $$HOME/.kube/config; \
+	kind create cluster --config cluster/kind-gvisor.yaml --kubeconfig $$tmp/kind; \
+	for k in context cluster user; do kubectl config delete-$$k kind-$(CLUSTER) >/dev/null 2>&1 || true; done; \
+	KUBECONFIG=$$HOME/.kube/config:$$tmp/kind kubectl config view --flatten > $$tmp/merged; \
+	install -m 600 $$tmp/merged $$HOME/.kube/config
 	$(MAKE) node-swap-off
 	$(MAKE) cilium
 	$(MAKE) coredns-upstream
@@ -64,11 +74,33 @@ agent-image:
 	docker build -t sandbox-agent:dev $(P1)/agent
 	kind load docker-image sandbox-agent:dev --name $(CLUSTER)
 
-p1: executor-image agent-image
+# Pull third-party images on the host, with retries, and load them into the
+# node, instead of letting the node pull them. A registry CDN that resets
+# large downloads failed a clean rebuild halfway; host pulls keep finished
+# layers between attempts and are cached across rebuilds.
+define preload
+	docker image inspect $(1) >/dev/null 2>&1 || \
+	  for i in 1 2 3 4 5 6 7 8 9 10; do docker pull -q $(1) && break; echo "pull $(1) failed ($$i), retrying"; sleep 15; done
+	docker image inspect $(1) >/dev/null
+	# Not `kind load docker-image`: it imports with --all-platforms, and
+	# Docker keeps only this host's platform of a multi-arch image, so the
+	# import fails with "content digest ... not found".
+	docker save $(1) | docker exec -i $(CLUSTER)-control-plane \
+	  ctr -n k8s.io images import --digests --snapshotter=overlayfs -
+endef
+
+# The test clients (agent-identity pods in the scripts) run this image.
+client-image:
+	$(call preload,$(CLIENT_IMAGE))
+
+p1: executor-image agent-image client-image
 	$(KUBECTL) apply -f $(P1)/manifests/
 
 verify:
-	./scripts/verify-gvisor.sh
+	./scripts/verify-sandbox.sh gvisor
+
+verify-kata:
+	./scripts/verify-sandbox.sh kata
 
 test-executor:
 	./scripts/test-executor.sh
@@ -77,10 +109,24 @@ test-agent:
 	./scripts/test-agent.sh
 
 attack-demos:
-	./scripts/attack-demos.sh
+	./scripts/attack-demos.sh gvisor
+
+attack-demos-kata:
+	./scripts/attack-demos.sh kata
 
 bench:
 	./scripts/bench.sh
 
 test-egress:
 	./scripts/test-egress.sh
+
+# Optional: Kata Containers (RuntimeClass kata-clh) plus a python-kata
+# template and warm pool, for the runtime comparison. Run after `make p1`;
+# not part of `make up`.
+kata:
+	$(call preload,quay.io/kata-containers/kata-deploy:$(KATA_VERSION))
+	helm upgrade --install kata-deploy --kube-context kind-$(CLUSTER) -n kube-system \
+	  https://github.com/kata-containers/kata-containers/releases/download/$(KATA_VERSION)/kata-deploy-$(KATA_VERSION).tgz \
+	  -f cluster/kata-values.yaml --wait --timeout 15m
+	$(KUBECTL) -n kube-system rollout status ds/kata-deploy --timeout=15m
+	$(KUBECTL) apply -f $(P1)/manifests/kata/

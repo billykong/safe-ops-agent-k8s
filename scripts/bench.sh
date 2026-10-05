@@ -11,6 +11,9 @@ set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 cd "$(dirname "$0")/.."
 WARM=${1:-10} COLD=${2:-8} REPS=${3:-7} BURST=${4:-4}
+# Kata joins the comparison when `make kata` has installed it.
+RUNTIMES=gvisor,runc
+kubectl get runtimeclass kata-clh >/dev/null 2>&1 && RUNTIMES=$RUNTIMES,kata
 P1=projects/01-sandboxed-code-exec
 REPORT=$P1/results/benchmarks.md
 RAW=$P1/results/benchmarks.jsonl
@@ -42,17 +45,21 @@ spec:
   containers:
   - name: client
     image: python:3.13-slim
-    command: ["python", "/client/bench_client.py", "$WARM", "$COLD", "$REPS", "$BURST"]
+    command: ["python", "/client/bench_client.py", "$WARM", "$COLD", "$REPS", "$BURST", "$RUNTIMES"]
     securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
     volumeMounts: [{name: client, mountPath: /client}]
   volumes: [{name: client, configMap: {name: bench-client}}]
 YAML
-echo "bench: $WARM warm claims, $COLD cold starts per runtime, burst of $BURST, $REPS overhead reps"
+echo "bench ($RUNTIMES): $WARM warm claims, $COLD cold starts per runtime, burst of $BURST, $REPS overhead reps"
 kubectl wait -n agent pod/bench-client --for=jsonpath='{.status.phase}'=Running --timeout=120s >/dev/null
 cat > "$TMP/progress.py" <<'EOF'
 import json, sys
 for line in sys.stdin:
-    r = json.loads(line)
+    try:
+        r = json.loads(line)
+    except ValueError:
+        print("  " + line.rstrip(), flush=True)  # e.g. a traceback from the client
+        continue
     if r["kind"] == "latency":
         print(f"  {r['mode']:13} {r['runtime']:6} ready {r['ready_ms']:7.0f} ms  first run {r['first_run_ms']:7.0f} ms", flush=True)
     elif r["kind"] == "burst":
