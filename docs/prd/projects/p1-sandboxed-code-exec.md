@@ -19,7 +19,7 @@ Implementation and findings: [projects/01-sandboxed-code-exec/](../../../project
 | P1-01 | Sandbox pods run under gVisor (`runtimeClassName: gvisor`). | Must | **Done**: `make verify` |
 | P1-02 | Sandbox pods run non-root, with a read-only root filesystem, all capabilities dropped, no privilege escalation, seccomp `RuntimeDefault`. Writable scratch is a size-limited `emptyDir` at `/tmp`. | Must | **Done**: `make verify` (uid, read-only root); `make test-executor` (no writes outside `/tmp`) |
 | P1-03 | No service-account token is mounted in the sandbox. | Must | **Done**: `make verify` |
-| P1-04 | The `sandboxes` namespace enforces Pod Security `restricted`. | Must | **Partial**: namespace label set; enforcement not tested |
+| P1-04 | The `sandboxes` namespace enforces Pod Security `restricted`. | Must | **Done**: `make test-pod-security` (in `sandboxes` and `agent`: 9 non-compliant pods denied by PodSecurity, a compliant one admitted; a `Sandbox` with a privileged template gets no pod; 24 checks) |
 | P1-05 | CPU, memory and ephemeral-storage limits per sandbox; a pids limit per pod. The memory limit is a hard cap: pods can't swap. | Must | **Done**: `make attack-demos` (memory bombs). The pod pids limit doesn't apply inside gVisor; fork bombs are stopped by P1-34 |
 | P1-06 | Sandbox egress is denied by default: no internet, no API server, no cluster DNS. | Must | **Done**: `make verify` with negative control |
 | P1-07 | Only the agent (`app=agent` in namespace `agent`) can reach the sandbox, and only on the executor port. | Must | **Done**: `make test-executor`, `make test-agent` |
@@ -36,7 +36,7 @@ Implementation and findings: [projects/01-sandboxed-code-exec/](../../../project
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
 | P1-20 | Sandboxes are claimed from a warm pool (`SandboxWarmPool`) and destroyed on release; no state carries between tasks. | Must | **Done**: `make test-agent` (claim, release, no leftover claim) |
-| P1-21 | A claim carries a `shutdownTime` backstop so a dead agent can't leak sandboxes. | Should | **Partial**: set by the agent; expiry not tested |
+| P1-21 | A claim carries a `shutdownTime` backstop so a dead agent can't leak sandboxes. | Should | **Done**: `make test-agent` (the agent's claims carry one; a claim past its `shutdownTime` is deleted with its sandbox) |
 | P1-22 | Readiness is reported without the node needing network access to the sandbox (`exec` probe). The probe is cheap under gVisor, and a 1s startup probe reports a cold sandbox ready within about a second of the executor listening. | Must | **Done**: warm pool reaches ready in all tests; timing in `make bench` |
 | P1-23 | Cap on warm-pool size and concurrent sandboxes (ResourceQuota). | Should | Planned |
 | P1-24 | Node swap is off for all pods (`kubelet.slice` `MemorySwapMax=0`), so memory limits are real regardless of runtime. | Must | **Done**: applied by `make up`; memory bombs in `make attack-demos` |
@@ -63,7 +63,7 @@ Implementation and findings: [projects/01-sandboxed-code-exec/](../../../project
 | P1-41 | Agent RBAC: `create/get/delete` on `sandboxclaims` and `get` on `sandboxes` in `sandboxes` only. No direct `Sandbox` creation, no claim update or list, no pods, exec or secrets. | Must | **Done**: `make test-agent` |
 | P1-42 | Admission policy: the agent's claims must name an approved warm pool (`python-gvisor`, `python-gvisor-pypi`) and may not add pod labels/annotations, env or volumes. Denials come from the policy, not schema validation. | Must | **Done**: `make test-agent` |
 | P1-43 | Agent egress: only the API server and sandbox port 8888. No internet, no DNS, no other sandbox ports. | Must | **Done**: `make test-agent` |
-| P1-44 | The agent always releases its claim, including on error. | Must | **Partial**: release on success tested; error path not tested |
+| P1-44 | The agent always releases its claim, including on error. | Must | **Done**: `make test-agent` (task error, executor killed mid-run, pod deleted mid-run via SIGTERM) |
 
 ### Evidence
 
@@ -71,7 +71,7 @@ Implementation and findings: [projects/01-sandboxed-code-exec/](../../../project
 | --- | --- | --- | --- |
 | P1-50 | Attack demos: fork bomb, memory bombs, credential hunt, persistence, TCP egress, DNS exfiltration, ICMP. Each names the layer that stopped it, with independent host-side evidence (restart counts, Hubble drops). | Must | **Done**: `make attack-demos`; report in `results/attack-demos.md` |
 | P1-51 | Benchmarks: cold `Sandbox` vs warm-pool claim latency; runc vs gVisor overhead for CPU, syscall-heavy and I/O workloads. Each states the runtime and environment used. | Must | **Done**: `make bench`; report in `results/benchmarks.md` |
-| P1-52 | A clean rebuild (`make down up p1`) passes all P1 suites. | Must | **Done**: last rebuild (2026-10-05) 7 + 8 + 26 + 13 + 9 checks across verify, test-executor, test-agent, test-egress and attack-demos (test-egress also reports its 1 known GAP), plus the optional Kata suites: 9 (verify-kata) + 9 (attack-demos-kata) |
+| P1-52 | A clean rebuild (`make down up p1`) passes all P1 suites. | Must | **Done**: last rebuild 2026-10-05, every suite passing: verify 7, test-pod-security 24, test-executor 8, test-agent 31, test-egress 13 (plus GAP-01 reported), attack-demos 8 + contained, executor unit tests 11; with `make kata`, verify-kata 9 and attack-demos-kata 8 + contained |
 
 ## Acceptance
 
