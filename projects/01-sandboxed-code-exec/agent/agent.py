@@ -10,6 +10,7 @@ vars, so it needs no DNS.
 
 import json
 import os
+import signal
 import ssl
 import sys
 import time
@@ -92,7 +93,18 @@ def run_in_sandbox(ip, code, timeout_s):
         return json.load(r)
 
 
+def _terminate(signum, frame):
+    # Kubernetes stops a pod with SIGTERM. The agent is PID 1, and the kernel
+    # applies no default action to PID 1, so without a handler SIGTERM was
+    # ignored: the pod lingered for the 30s grace period, was SIGKILLed, and
+    # the finally below never ran, leaking the claim until its shutdownTime.
+    # SystemExit isn't an Exception, so it unwinds straight to the release.
+    log("terminated", signal=signal.Signals(signum).name)
+    raise SystemExit(128 + signum)
+
+
 def main():
+    signal.signal(signal.SIGTERM, _terminate)
     t0 = time.monotonic()
     try:
         name, ip = claim_sandbox()

@@ -21,8 +21,8 @@ This folder is the product requirements document (PRD) for the whole project: wh
 
 | Project | Status |
 | --- | --- |
-| P1 Sandboxed code execution | Milestones 1-7 done; 8 (close remaining Must items) next |
-| P2 Approval gate | Not started |
+| P1 Sandboxed code execution | **Phase 1 complete**: milestones 1-8 done, all Must requirements Done |
+| P2 Approval gate | Next: milestone 1 (`ChangeRequest` CRD and controller) |
 | P3 Tool identity and policy | Not started |
 | P4 Observability and evals | Not started |
 | P5 Local inference | Not started |

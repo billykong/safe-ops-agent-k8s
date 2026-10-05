@@ -32,10 +32,10 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 5. **Done.** Benchmarks: cold sandbox vs warm-pool claim; runc vs gVisor overhead (CPU, syscall-heavy, I/O) (`make bench`).
 6. **Done.** DNS-scoped egress for tasks that need it (Cilium `toFQDNs`, DNS proxy, SNI pin) (`make test-egress`). Domain fronting remains open (P1-13).
 7. **Done.** Kata Containers comparison, on WSL2 through nested KVM with Cloud Hypervisor (`make kata`, `verify-kata`, `attack-demos-kata`, `bench`). Bare-metal numbers remain optional.
-8. **Next.** P1 wrap-up: close the remaining **Must** items still *Partial*: P1-04 (test Pod Security `restricted` enforcement) and P1-44 (claim released on the error path). Then phase 1's exit criteria are met.
+8. **Done.** P1 wrap-up: Pod Security enforcement tested (P1-04, `make test-pod-security`); claim released on every error path, including SIGTERM (P1-44), and the `shutdownTime` backstop (P1-21) (`make test-agent`). **Phase 1's exit criteria are met.**
 
 ### P2: approval gate
-1. `ChangeRequest` CRD with immutable spec, status-subresource approval, and the controller (kubebuilder).
+1. **Next.** `ChangeRequest` CRD with immutable spec, status-subresource approval, and the controller (kubebuilder).
 2. Approval CLI and webhook with authenticated approver identity; hash binding and expiry.
 3. Admission webhook rejecting direct writes by the agent's identity.
 4. Change budget and kill switch.
