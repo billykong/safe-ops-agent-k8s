@@ -11,9 +11,10 @@ The plan and requirements live in [docs/prd/](docs/prd/README.md). Weaknesses we
 | `cluster/` | kind cluster config (gVisor runtime wired in) |
 | `scripts/` | Host setup and verification helpers |
 | `projects/01-sandboxed-code-exec/` | agent-sandbox + gVisor, hardened sandbox pods, warm-pool latency |
+| `projects/02-approval-gate/` | `ChangeRequest` CRD and approval controller (kubebuilder): the agent proposes, a human approves, the controller applies |
 | `docs/prd/` | Product requirements: goals, architecture, security requirements, roadmap, and per-project requirements with status |
 
-Projects 2-5 (approval gate, tool identity/policy, observability/evals, local inference) get their own folders as they start.
+Projects 3-5 (tool identity/policy, observability/evals, local inference) get their own folders as they start.
 
 ## Quick start
 
@@ -26,6 +27,8 @@ make test-pod-security         # Pod Security restricted is enforced, not just l
 make bench                     # startup latency and gVisor vs runc overhead
 make test-egress               # DNS-scoped egress for the pypi sandbox pool
 make kata verify-kata          # optional: Kata Containers sandboxes (nested KVM)
+./scripts/setup-go.sh          # once, no sudo: Go for the P2 controller
+make p2 test-approval          # approval gate: propose, approve, apply
 ```
 
 ## Publishing

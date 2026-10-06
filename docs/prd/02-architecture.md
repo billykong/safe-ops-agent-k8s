@@ -60,7 +60,7 @@ flowchart LR
 | **LLM gateway** | P3 | Trusted | Model API key; token budgets and rate limits | Planned |
 | **MCP / tool gateway** | P3 | Trusted | Tool secrets; per-agent authorisation | Planned |
 | **Policy engine** (Kyverno/OPA; ValidatingAdmissionPolicy) | P1-P3 | Trusted | Rules: allow, deny, escalate | VAP for sandbox claims built (P1); rest planned |
-| **ChangeRequest CRD + approval controller / executor** | P2 | Trusted, crown jewel | Namespace-scoped write credentials | Planned |
+| **ChangeRequest CRD + approval controller / executor** | P2 | Trusted, crown jewel | Namespace-scoped write credentials | Built (M1): CRD, controller, agent proposer role |
 | **Kill switch** | P2 | Trusted | Flag checked by a fail-closed webhook, plus credential revocation | Planned |
 | **Durable workflow** (Temporal or LangGraph `interrupt`) | P2 | Trusted | Agent state across long approvals | Planned |
 | **Observability** (OTel GenAI traces, Prometheus/Grafana, API audit log) | P4 | Trusted; agent can't write to the store | Traces, metrics, audit | Planned |

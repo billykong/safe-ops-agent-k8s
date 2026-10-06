@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: approval-controller
+  namespace: approval-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: approval-controller}
+  template:
+    metadata:
+      labels: {app: approval-controller}
+    spec:
+      serviceAccountName: approval-controller
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: manager
+        # Built by `make p2` and loaded into kind; never pulled.
+        image: approval-controller:dev
+        imagePullPolicy: Never
+        # Metrics and health endpoints off: default-deny ingress here, and
+        # kubelet HTTP probes are dropped as "world" on this cluster (P1
+        # README finding 6). One replica, so no leader election.
+        args: ["--metrics-bind-address=0", "--health-probe-bind-address=0"]
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        resources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {cpu: 500m, memory: 128Mi}

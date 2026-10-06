@@ -1,0 +1,3 @@
+# Only the prebuilt binary goes into the image.
+**
+!bin/manager

@@ -1,0 +1,27 @@
+# approval-system: the controller (trusted; holds write credentials).
+# approvals: where ChangeRequests live; the agent proposes here.
+# workloads: what approved changes act on. The controller may write here;
+# the agent may not.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: approval-system
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: approvals
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: workloads
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

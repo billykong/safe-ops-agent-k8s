@@ -1,0 +1,27 @@
+# The agent may propose and read ChangeRequests in the approvals namespace.
+# No update/patch (the spec is immutable anyway), no delete, and nothing on
+# changerequests/status: approval lives there (P2-10). No write access to
+# workloads at all.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: changerequest-proposer
+  namespace: approvals
+rules:
+- apiGroups: ["approval.safe-ops.io"]
+  resources: ["changerequests"]
+  verbs: ["create", "get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-changerequest-proposer
+  namespace: approvals
+subjects:
+- kind: ServiceAccount
+  name: agent
+  namespace: agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: changerequest-proposer

@@ -35,8 +35,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 8. **Done.** P1 wrap-up: Pod Security enforcement tested (P1-04, `make test-pod-security`); claim released on every error path, including SIGTERM (P1-44), and the `shutdownTime` backstop (P1-21) (`make test-agent`). **Phase 1's exit criteria are met.**
 
 ### P2: approval gate
-1. **Next.** `ChangeRequest` CRD with immutable spec, status-subresource approval, and the controller (kubebuilder).
-2. Approval CLI and webhook with authenticated approver identity; hash binding and expiry.
+1. **Done.** `ChangeRequest` CRD with immutable spec, status-subresource approval, and the controller (kubebuilder) (`make p2 test-approval`).
+2. **Next.** Approval CLI and webhook with authenticated approver identity; hash binding and expiry.
 3. Admission webhook rejecting direct writes by the agent's identity.
 4. Change budget and kill switch.
 5. Durable execution across long approvals; pod-restart demo.
