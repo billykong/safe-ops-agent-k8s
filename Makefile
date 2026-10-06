@@ -4,12 +4,15 @@ KATA_VERSION    ?= 4.2.0
 CLUSTER         ?= safe-ops
 CLIENT_IMAGE    := python:3.13-slim
 P1              := projects/01-sandboxed-code-exec
+P2              := projects/02-approval-gate
+# Go for the P2 controller, installed by scripts/setup-go.sh (no sudo).
+export PATH     := $(HOME)/.local/go/bin:$(PATH)
 # Always target this cluster, never whatever context is current: creating
 # another kind cluster switches the current context to it.
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security
+.PHONY: client-image up down node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -127,3 +130,15 @@ kata:
 	  -f cluster/kata-values.yaml --wait --timeout 15m
 	$(KUBECTL) -n kube-system rollout status ds/kata-deploy --timeout=15m
 	$(KUBECTL) apply -f $(P1)/manifests/kata/
+
+# P2: ChangeRequest CRD, approval controller, agent's proposer role, demo
+# workload. Builds the controller on the host and loads it into kind.
+p2:
+	$(MAKE) -C $(P2) kind-load CLUSTER=$(CLUSTER)
+	$(KUBECTL) apply -f $(P2)/manifests/00-namespaces.yaml
+	$(KUBECTL) apply -f $(P2)/config/crd/bases/ -f $(P2)/config/rbac/role.yaml -f $(P2)/manifests/
+	$(KUBECTL) -n approval-system rollout restart deploy/approval-controller
+	$(KUBECTL) -n approval-system rollout status deploy/approval-controller --timeout=120s
+
+test-approval:
+	./scripts/test-approval.sh

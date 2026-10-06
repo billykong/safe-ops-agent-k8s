@@ -2,7 +2,7 @@
 
 **Goal:** the agent never changes the cluster directly. It proposes; a human approves; a small trusted controller applies. Nothing the agent can do approves, alters or bypasses that flow. Covers goal G2.
 
-Status: **not started**. Depends on P1.
+Status: **milestone 1 done** (CRD, controller, agent fence). Implementation: [projects/02-approval-gate/](../../../projects/02-approval-gate/README.md). Depends on P1.
 
 ## User stories
 
@@ -17,23 +17,23 @@ Status: **not started**. Depends on P1.
 
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
-| P2-01 | A `ChangeRequest` CRD holds intent, the change (typed action preferred over a raw diff), blast radius, declared scope (namespaces, kinds) and a rollback procedure. | Must | Planned |
-| P2-02 | The spec is immutable after creation (CEL `self == oldSelf`). | Must | Planned |
-| P2-03 | A controller (kubebuilder) applies a request only when it is approved, unexpired and its hash matches. It holds namespace-scoped write credentials, never cluster-admin, and contains no LLM. | Must | Planned |
-| P2-04 | Before applying, the controller re-checks live state against the recorded pre-state. On mismatch, the request goes back for re-approval. | Must | Planned |
-| P2-05 | Every applied change records pre-state, the exact command or manifest, and the rollback, before it executes. | Must | Planned |
-| P2-06 | Typed actions (`restart_deployment`, `scale`, `drain_node`, ...) are the default path; arbitrary commands are a rare, separately approved exception, pinned by hash. | Should | Planned |
-| P2-07 | Policy rejects actions outside the declared scope, even when approved. | Should | Planned |
+| P2-01 | A `ChangeRequest` CRD holds intent, the change (typed action preferred over a raw diff), blast radius, declared scope (namespaces, kinds) and a rollback procedure. | Must | **Done**: `make test-approval` (malformed actions rejected by schema/CEL) |
+| P2-02 | The spec is immutable after creation (CEL `self == oldSelf`). | Must | **Done**: `make test-approval` (an admin's spec edit is rejected) |
+| P2-03 | A controller (kubebuilder) applies a request only when it is approved, unexpired and its hash matches. It holds namespace-scoped write credentials, never cluster-admin, and contains no LLM. | Must | **Partial**: applies only when approved; namespace-scoped `get`/`patch` on Deployments, no LLM (`make test-approval`). Expiry and hash binding: M2 |
+| P2-04 | Before applying, the controller re-checks live state against the recorded pre-state. On mismatch, the request goes back for re-approval. | Must | **Done**: `make test-approval` (drift after review clears the approval and re-proposes) |
+| P2-05 | Every applied change records pre-state, the exact command or manifest, and the rollback, before it executes. | Must | **Done**: `make test-approval` (pre-state, exact merge patch and rollback patch in status at proposal; restart timestamp fixed) |
+| P2-06 | Typed actions (`restart_deployment`, `scale`, `drain_node`, ...) are the default path; arbitrary commands are a rare, separately approved exception, pinned by hash. | Should | **Partial**: `ScaleDeployment` and `RestartDeployment`; typed actions are the only path (no arbitrary commands yet) |
+| P2-07 | Policy rejects actions outside the declared scope, even when approved. | Should | **Done** in the controller: `make test-approval`. A policy engine joins in P3 |
 
 ### Approval integrity
 
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
-| P2-10 | Approval lives in the `status` subresource; the agent's identity has no `update` on `changerequests/status`. | Must | Planned |
-| P2-11 | The approver is recorded from the authenticated request identity, not from a field in the object. Approval requires an authenticated human. | Must | Planned |
+| P2-10 | Approval lives in the `status` subresource; the agent's identity has no `update` on `changerequests/status`. | Must | **Done**: `make test-approval` (can-i and an actual self-approval attempt, forbidden) |
+| P2-11 | The approver is recorded from the authenticated request identity, not from a field in the object. Approval requires an authenticated human. | Must | Planned (M2). Until then `approver` is whatever the person with status write access writes |
 | P2-12 | Approval binds to a content hash of the spec and expires. | Must | Planned |
 | P2-13 | An admission webhook rejects direct writes to managed resources by the agent's identity, fail-closed and scoped to that identity. | Must | Planned |
-| P2-14 | The agent has no RBAC on webhooks, policies, the kill switch, CRDs or RBAC objects, and can't create pods (SEC-06). | Must | Planned |
+| P2-14 | The agent has no RBAC on webhooks, policies, the kill switch, CRDs or RBAC objects, and can't create pods (SEC-06). | Must | **Partial**: no RBAC on CRDs, RBAC objects, the controller or pods in `workloads` (`make test-approval`); webhooks and kill switch don't exist yet |
 
 ### Bounding and stopping
 

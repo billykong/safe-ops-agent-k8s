@@ -1,0 +1,36 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: approval-controller
+rules:
+- apiGroups:
+  - approval.safe-ops.io
+  resources:
+  - changerequests
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - approval.safe-ops.io
+  resources:
+  - changerequests/status
+  verbs:
+  - get
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: approval-controller
+  namespace: workloads
+rules:
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - patch

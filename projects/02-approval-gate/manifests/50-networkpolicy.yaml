@@ -1,0 +1,22 @@
+# The controller talks to the API server and nothing else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: approval-system
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: controller-to-apiserver
+  namespace: approval-system
+spec:
+  endpointSelector:
+    matchLabels: {app: approval-controller}
+  egress:
+  - toEntities: [kube-apiserver]
+    toPorts:
+    - ports: [{port: "6443", protocol: TCP}]

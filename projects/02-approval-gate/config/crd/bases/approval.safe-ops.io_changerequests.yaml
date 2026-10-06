@@ -1,0 +1,297 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: changerequests.approval.safe-ops.io
+spec:
+  group: approval.safe-ops.io
+  names:
+    kind: ChangeRequest
+    listKind: ChangeRequestList
+    plural: changerequests
+    singular: changerequest
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.action.type
+      name: Action
+      type: string
+    - jsonPath: .spec.action.target.name
+      name: Target
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.approval.approver
+      name: Approver
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ChangeRequest is a proposed change to the cluster. The agent creates it;
+          a human approves it; the controller applies it.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec is the proposal; immutable after creation.
+            properties:
+              action:
+                description: Action is the change itself.
+                properties:
+                  replicas:
+                    description: replicas for ScaleDeployment.
+                    format: int32
+                    maximum: 50
+                    minimum: 0
+                    type: integer
+                  target:
+                    description: TargetRef names the object an action changes.
+                    properties:
+                      kind:
+                        description: kind of the target. Only Deployments for now.
+                        enum:
+                        - Deployment
+                        type: string
+                      name:
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                      namespace:
+                        maxLength: 63
+                        minLength: 1
+                        type: string
+                    required:
+                    - kind
+                    - name
+                    - namespace
+                    type: object
+                  type:
+                    description: |-
+                      ActionType is a typed action the controller knows how to apply. Typed
+                      actions are the default path (P2-06): the agent picks one and its
+                      parameters, and the controller, not the agent, decides the exact patch.
+                    enum:
+                    - ScaleDeployment
+                    - RestartDeployment
+                    type: string
+                required:
+                - target
+                - type
+                type: object
+                x-kubernetes-validations:
+                - message: ScaleDeployment needs replicas
+                  rule: self.type != 'ScaleDeployment' || has(self.replicas)
+                - message: replicas only applies to ScaleDeployment
+                  rule: self.type == 'ScaleDeployment' || !has(self.replicas)
+              blastRadius:
+                description: 'blastRadius: what the proposer expects the change to
+                  affect.'
+                maxLength: 2000
+                minLength: 1
+                type: string
+              intent:
+                description: 'intent: what the change is for, in the proposer''s words.'
+                maxLength: 2000
+                minLength: 1
+                type: string
+              rollback:
+                description: |-
+                  rollback: how to undo the change, in the proposer's words. The
+                  controller also records an exact rollback patch before applying.
+                maxLength: 2000
+                minLength: 1
+                type: string
+              scope:
+                description: |-
+                  Scope is what the proposer declares the change may touch. The controller
+                  rejects an action outside it, even if approved (P2-07).
+                properties:
+                  kinds:
+                    items:
+                      type: string
+                    maxItems: 10
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                  namespaces:
+                    items:
+                      type: string
+                    maxItems: 10
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                required:
+                - kinds
+                - namespaces
+                type: object
+            required:
+            - action
+            - blastRadius
+            - intent
+            - rollback
+            - scope
+            type: object
+            x-kubernetes-validations:
+            - message: 'spec is immutable: create a new ChangeRequest instead'
+              rule: self == oldSelf
+          status:
+            description: ChangeRequestStatus is owned by the controller, except approval.
+            properties:
+              appliedAt:
+                format: date-time
+                type: string
+              approval:
+                description: 'approval: the human decision, set through the status
+                  subresource.'
+                properties:
+                  approver:
+                    minLength: 1
+                    type: string
+                  comment:
+                    type: string
+                  decision:
+                    description: Decision by an approver.
+                    enum:
+                    - Approved
+                    - Rejected
+                    type: string
+                  time:
+                    format: date-time
+                    type: string
+                required:
+                - approver
+                - decision
+                - time
+                type: object
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              message:
+                type: string
+              phase:
+                description: Phase of a ChangeRequest.
+                enum:
+                - Pending
+                - NeedsReapproval
+                - Applying
+                - Applied
+                - Rejected
+                - Failed
+                type: string
+              plan:
+                description: |-
+                  plan: the exact patch the controller will apply, recorded before it
+                  executes (P2-05).
+                type: string
+              preState:
+                description: |-
+                  preState: the target as recorded when the request was proposed (or
+                  re-proposed after drift). Checked against live state before applying.
+                properties:
+                  generation:
+                    description: generation of the target, which changes with any
+                      spec change.
+                    format: int64
+                    type: integer
+                  replicas:
+                    format: int32
+                    type: integer
+                  restartedAt:
+                    description: 'restartedAt: the target''s restart annotation, if
+                      any.'
+                    type: string
+                required:
+                - generation
+                - replicas
+                type: object
+              rollbackPlan:
+                description: |-
+                  rollbackPlan: the exact patch that undoes the change, recorded before
+                  it executes.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
