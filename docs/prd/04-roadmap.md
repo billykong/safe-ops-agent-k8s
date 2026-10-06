@@ -36,8 +36,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 
 ### P2: approval gate
 1. **Done.** `ChangeRequest` CRD with immutable spec, status-subresource approval, and the controller (kubebuilder) (`make p2 test-approval`).
-2. **Next.** Approval CLI and webhook with authenticated approver identity; hash binding and expiry.
-3. Admission webhook rejecting direct writes by the agent's identity.
+2. **Done.** Approval CLI (`approvalctl`) with authenticated approver identity (admission policies, client-certificate approvers); hash binding and expiry (`make test-approval`).
+3. **Next.** Admission webhook rejecting direct writes by the agent's identity.
 4. Change budget and kill switch.
 5. Durable execution across long approvals; pod-restart demo.
 6. Deterministic approval packet and oversight metrics.
@@ -85,7 +85,7 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 | ~~Does Cilium's DNS proxy (`toFQDNs`) work with the eBPF-only datapath on the stock WSL2 kernel?~~ Yes, with transparent mode off (and Envoy not using the original source address). | Resolved (P1 M6) |
 | Build a custom WSL2 kernel with `xt_socket`/TPROXY/`NFT_QUEUE`, or move networking-sensitive work to bare metal? | Not blocking: each missing-module gap so far has a workaround (P1 README findings 4, 6, 19). Revisit on bare metal (P1 M7) |
 | Temporal vs LangGraph `interrupt` for durable execution | P2 M5 |
-| Approval channel: CLI only, or a Slack-style webhook with real authentication? | P2 M2 |
+| ~~Approval channel: CLI only, or a Slack-style webhook?~~ CLI (`approvalctl`) with certificate-authenticated approvers; a chat channel only if it can carry the same identity. | Resolved (P2 M2) |
 | Kyverno vs OPA Gatekeeper vs plain ValidatingAdmissionPolicy for the action gate | P3 M4 |
 | SPIFFE/SPIRE vs projected SA tokens for workload identity | P3 M1 |
 | Does the NVIDIA device plugin work on WSL2's `/dev/dxg` with k3s? | P5 M2 |

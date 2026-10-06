@@ -27,6 +27,9 @@ spec:
     - jsonPath: .status.approval.approver
       name: Approver
       type: string
+    - jsonPath: .status.expiresAt
+      name: Expires
+      type: date
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -105,6 +108,15 @@ spec:
                   rule: self.type != 'ScaleDeployment' || has(self.replicas)
                 - message: replicas only applies to ScaleDeployment
                   rule: self.type == 'ScaleDeployment' || !has(self.replicas)
+              approvalWindowSeconds:
+                default: 3600
+                description: |-
+                  approvalWindowSeconds: how long after the plan is proposed an
+                  approval is accepted (P2-12). Capped at a day.
+                format: int32
+                maximum: 86400
+                minimum: 10
+                type: integer
               blastRadius:
                 description: 'blastRadius: what the proposer expects the change to
                   affect.'
@@ -167,9 +179,12 @@ spec:
                   subresource.'
                 properties:
                   approver:
-                    minLength: 1
+                    description: |-
+                      approver: set from the authenticated request identity by admission
+                      policy, whatever the client sends.
                     type: string
                   comment:
+                    maxLength: 1000
                     type: string
                   decision:
                     description: Decision by an approver.
@@ -177,12 +192,21 @@ spec:
                     - Approved
                     - Rejected
                     type: string
+                  reviewHash:
+                    description: |-
+                      reviewHash: the status.reviewHash of the packet the approver saw. An
+                      approval for any other hash is discarded (P2-12).
+                    pattern: ^sha256:[0-9a-f]{64}$
+                    type: string
                   time:
+                    description: |-
+                      time: when the client says it decided. Informational only: expiry is
+                      judged by the controller's clock against expiresAt.
                     format: date-time
                     type: string
                 required:
-                - approver
                 - decision
+                - reviewHash
                 - time
                 type: object
               conditions:
@@ -244,6 +268,12 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              expiresAt:
+                description: |-
+                  expiresAt: approvals arriving after this (by the controller's clock)
+                  are not applied; the request becomes Expired.
+                format: date-time
+                type: string
               message:
                 type: string
               phase:
@@ -255,6 +285,7 @@ spec:
                 - Applied
                 - Rejected
                 - Failed
+                - Expired
                 type: string
               plan:
                 description: |-
@@ -282,6 +313,12 @@ spec:
                 - generation
                 - replicas
                 type: object
+              reviewHash:
+                description: |-
+                  reviewHash: sha256 over the request's UID, spec, preState, plan and
+                  rollbackPlan: everything the approver reviews. Changes whenever the
+                  controller re-plans, which invalidates earlier approvals.
+                type: string
               rollbackPlan:
                 description: |-
                   rollbackPlan: the exact patch that undoes the change, recorded before

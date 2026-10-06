@@ -6,8 +6,8 @@ LOCALBIN ?= $(shell pwd)/bin
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 CONTROLLER_TOOLS_VERSION ?= v0.22.0
 
-.PHONY: all manifests generate fmt vet test build docker-build kind-load
-all: build
+.PHONY: all manifests generate fmt vet test build cli docker-build kind-load
+all: build cli
 
 # CRD and the controller's RBAC, generated from the markers in api/ and
 # internal/controller/.
@@ -28,6 +28,10 @@ test: manifests generate fmt vet
 
 build: manifests generate fmt vet
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/manager cmd/main.go
+
+# The approval CLI, for this host.
+cli: generate fmt vet
+	go build -trimpath -o bin/approvalctl ./cmd/approvalctl
 
 docker-build: build
 	docker build -t $(IMG) .

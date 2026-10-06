@@ -1,0 +1,31 @@
+# Humans in the safe-ops:approvers group may read ChangeRequests and write
+# their status (to approve or reject). The admission policies in
+# 70-approval-policies.yaml decide what they may write there: the approval
+# only, under their own name. Membership comes from authentication (e.g. the
+# O= of a client certificate; scripts/new-approver.sh issues one).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: changerequest-approver
+  namespace: approvals
+rules:
+- apiGroups: ["approval.safe-ops.io"]
+  resources: ["changerequests"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["approval.safe-ops.io"]
+  resources: ["changerequests/status"]
+  verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: approvers
+  namespace: approvals
+subjects:
+- kind: Group
+  apiGroup: rbac.authorization.k8s.io
+  name: safe-ops:approvers
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: changerequest-approver

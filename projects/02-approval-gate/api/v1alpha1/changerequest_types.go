@@ -75,10 +75,17 @@ type ChangeRequestSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2000
 	Rollback string `json:"rollback"`
+	// approvalWindowSeconds: how long after the plan is proposed an
+	// approval is accepted (P2-12). Capped at a day.
+	// +optional
+	// +kubebuilder:default=3600
+	// +kubebuilder:validation:Minimum=10
+	// +kubebuilder:validation:Maximum=86400
+	ApprovalWindowSeconds int32 `json:"approvalWindowSeconds,omitempty"`
 }
 
 // Phase of a ChangeRequest.
-// +kubebuilder:validation:Enum=Pending;NeedsReapproval;Applying;Applied;Rejected;Failed
+// +kubebuilder:validation:Enum=Pending;NeedsReapproval;Applying;Applied;Rejected;Failed;Expired
 type Phase string
 
 const (
@@ -95,6 +102,8 @@ const (
 	PhaseRejected Phase = "Rejected"
 	// PhaseFailed: the change could not be applied.
 	PhaseFailed Phase = "Failed"
+	// PhaseExpired: no valid approval arrived before expiresAt.
+	PhaseExpired Phase = "Expired"
 )
 
 // Decision by an approver.
@@ -107,15 +116,25 @@ const (
 )
 
 // Approval is written by a human through the status subresource, which the
-// agent's identity can't update (P2-10). Binding the approver to the
-// authenticated request identity, the spec hash and an expiry comes next
-// (P2 milestone 2).
+// agent's identity can't update (P2-10). Admission policies make it
+// trustworthy (manifests/70-approval-policies.yaml): only members of
+// safe-ops:approvers who aren't service accounts may set it, and approver is
+// overwritten with the authenticated username (P2-11).
 type Approval struct {
 	Decision Decision `json:"decision"`
-	// +kubebuilder:validation:MinLength=1
-	Approver string      `json:"approver"`
-	Time     metav1.Time `json:"time"`
+	// approver: set from the authenticated request identity by admission
+	// policy, whatever the client sends.
 	// +optional
+	Approver string `json:"approver,omitempty"`
+	// time: when the client says it decided. Informational only: expiry is
+	// judged by the controller's clock against expiresAt.
+	Time metav1.Time `json:"time"`
+	// reviewHash: the status.reviewHash of the packet the approver saw. An
+	// approval for any other hash is discarded (P2-12).
+	// +kubebuilder:validation:Pattern=`^sha256:[0-9a-f]{64}$`
+	ReviewHash string `json:"reviewHash"`
+	// +optional
+	// +kubebuilder:validation:MaxLength=1000
 	Comment string `json:"comment,omitempty"`
 }
 
@@ -150,6 +169,15 @@ type ChangeRequestStatus struct {
 	// it executes.
 	// +optional
 	RollbackPlan string `json:"rollbackPlan,omitempty"`
+	// reviewHash: sha256 over the request's UID, spec, preState, plan and
+	// rollbackPlan: everything the approver reviews. Changes whenever the
+	// controller re-plans, which invalidates earlier approvals.
+	// +optional
+	ReviewHash string `json:"reviewHash,omitempty"`
+	// expiresAt: approvals arriving after this (by the controller's clock)
+	// are not applied; the request becomes Expired.
+	// +optional
+	ExpiresAt *metav1.Time `json:"expiresAt,omitempty"`
 	// +optional
 	AppliedAt *metav1.Time `json:"appliedAt,omitempty"`
 	// +listType=map
@@ -164,6 +192,7 @@ type ChangeRequestStatus struct {
 // +kubebuilder:printcolumn:name="Target",type=string,JSONPath=`.spec.action.target.name`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Approver",type=string,JSONPath=`.status.approval.approver`
+// +kubebuilder:printcolumn:name="Expires",type=date,JSONPath=`.status.expiresAt`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // ChangeRequest is a proposed change to the cluster. The agent creates it;

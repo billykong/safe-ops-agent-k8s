@@ -135,6 +135,10 @@ func (in *ChangeRequestStatus) DeepCopyInto(out *ChangeRequestStatus) {
 		*out = new(TargetState)
 		**out = **in
 	}
+	if in.ExpiresAt != nil {
+		in, out := &in.ExpiresAt, &out.ExpiresAt
+		*out = (*in).DeepCopy()
+	}
 	if in.AppliedAt != nil {
 		in, out := &in.AppliedAt, &out.AppliedAt
 		*out = (*in).DeepCopy()

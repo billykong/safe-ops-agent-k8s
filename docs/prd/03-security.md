@@ -30,11 +30,11 @@ Reference documents (read 2026-09-29):
 | SEC-01 | The agent loop and the code sandbox run in **separate pods**. The sandbox has no credentials, no GPU, and no route to the agent, gateways, workflow engine or API server. | Must | **Done**: `make verify`, `make test-executor` |
 | SEC-02 | DNS is treated as an exfiltration channel. The sandbox has no egress by default. Where egress is needed, only allowlisted names can be *resolved* (Cilium L7 DNS), ICMP is blocked, and allowlists are minimal. | Must | **Done**: no egress, DNS exfiltration and ICMP blocked (`make attack-demos`); DNS-scoped egress with exact names for tasks that need it (`make test-egress`). Domain fronting remains: see residual risks |
 | SEC-03 | The agent never holds the model API key or tool secrets. Gateways hold them and authenticate the agent by workload identity. | Must | Planned (P3) |
-| SEC-04 | The agent cannot approve its own change: approval is in the status subresource; the agent has no `update` on `changerequests/status`; the approver is recorded from the authenticated request identity; approval needs an authenticated human. | Must | Planned (P2) |
-| SEC-05 | Each approval is bound to exactly what was approved: a content hash of an immutable spec (CEL `self == oldSelf`), an expiry, and a live-state re-check before apply. | Must | Planned (P2) |
+| SEC-04 | The agent cannot approve its own change: approval is in the status subresource; the agent has no `update` on `changerequests/status`; the approver is recorded from the authenticated request identity; approval needs an authenticated human. | Must | **Done**: `make test-approval` (RBAC, plus admission policies that stamp the authenticated approver and require a human in `safe-ops:approvers`) |
+| SEC-05 | Each approval is bound to exactly what was approved: a content hash of an immutable spec (CEL `self == oldSelf`), an expiry, and a live-state re-check before apply. | Must | **Done**: `make test-approval` (review hash over spec, pre-state, plan and rollback; immutable spec; expiry; live-state re-check) |
 | SEC-06 | The agent cannot touch its own guardrails. Its RBAC excludes: admission webhooks and policy objects; the kill switch; CRDs and RBAC objects (no `escalate`, `bind`, `impersonate`); `secrets`, `pods/exec`, `serviceaccounts/token`, `nodes/proxy`; creating pods. | Must | **Partial**: P1 agent RBAC tested (`make test-agent`); full list applies from P2 |
 | SEC-07 | Content-level admission for agent identities: RBAC grants verbs; admission policy constrains content (approved references only, no scope-widening fields). | Must | **Done** for SandboxClaims: `make test-agent` |
-| SEC-08 | The write-capable executor is small and deterministic: no LLM, no free-text parsing; it applies only typed, approved, hash-matched artefacts with namespace-scoped credentials (never cluster-admin). | Must | Planned (P2) |
+| SEC-08 | The write-capable executor is small and deterministic: no LLM, no free-text parsing; it applies only typed, approved, hash-matched artefacts with namespace-scoped credentials (never cluster-admin). | Must | **Done**: `make test-approval` (typed actions, no LLM, hash-matched approvals, `get`/`patch` on Deployments in `workloads` only) |
 
 ### Fail-safe operation
 
@@ -64,7 +64,7 @@ Reference documents (read 2026-09-29):
 | SEC-35 | Mutual authentication between components (Cilium mutual auth or a mesh). | Could | Planned (P3) |
 | SEC-36 | Kubernetes API audit logging captures the agent's identity, shipped to a store the agent can't write or delete. | Should | Planned (P4) |
 | SEC-37 | Trace content capture (prompts, tool outputs) off or redacted by default. | Should | Planned (P4) |
-| SEC-38 | Each `ChangeRequest` carries a declared scope (namespaces, kinds); policy rejects actions outside it even if approved. | Should | Planned (P2) |
+| SEC-38 | Each `ChangeRequest` carries a declared scope (namespaces, kinds); policy rejects actions outside it even if approved. | Should | **Done** in the controller: `make test-approval`; a policy engine joins in P3 |
 | SEC-39 | GPU access never via `privileged: true`; the untrusted-code sandbox never gets a GPU; NVIDIA Container Toolkit kept patched. | Must | Planned (P5) |
 
 ## Governance artefacts

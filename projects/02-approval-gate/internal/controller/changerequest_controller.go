@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -49,10 +51,11 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.Get(ctx, req.NamespacedName, &cr); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	base := cr.DeepCopy()
 	st := &cr.Status
 
 	switch st.Phase {
-	case approvalv1alpha1.PhaseApplied, approvalv1alpha1.PhaseRejected, approvalv1alpha1.PhaseFailed:
+	case approvalv1alpha1.PhaseApplied, approvalv1alpha1.PhaseRejected, approvalv1alpha1.PhaseFailed, approvalv1alpha1.PhaseExpired:
 		return ctrl.Result{}, nil
 
 	case "":
@@ -60,33 +63,63 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		// recorded the pre-state and plan didn't review them: drop it.
 		st.Approval = nil
 		if err := CheckScope(cr.Spec); err != nil {
-			return r.finish(ctx, &cr, approvalv1alpha1.PhaseRejected, err.Error())
+			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseRejected, err.Error())
 		}
 		dep, err := r.target(ctx, cr.Spec.Action.Target)
 		if err != nil {
-			return r.finish(ctx, &cr, approvalv1alpha1.PhaseFailed, fmt.Sprintf("reading target: %v", err))
+			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, fmt.Sprintf("reading target: %v", err))
 		}
 		if err := r.propose(&cr, dep); err != nil {
-			return r.finish(ctx, &cr, approvalv1alpha1.PhaseFailed, err.Error())
+			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, err.Error())
 		}
 		st.Phase = approvalv1alpha1.PhasePending
 		st.Message = "waiting for approval"
 		log.Info("proposed", "plan", st.Plan)
-		return ctrl.Result{}, r.Status().Update(ctx, &cr)
+		return ctrl.Result{}, r.save(ctx, &cr, base)
 
 	case approvalv1alpha1.PhasePending, approvalv1alpha1.PhaseNeedsReapproval:
-		if st.Approval == nil {
-			return ctrl.Result{}, nil
+		if st.ExpiresAt == nil || st.ReviewHash == "" {
+			// Proposed before review hashes and expiry existed: re-propose,
+			// and require an approval of the new packet.
+			dep, err := r.target(ctx, cr.Spec.Action.Target)
+			if err != nil {
+				return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, fmt.Sprintf("reading target: %v", err))
+			}
+			st.Approval = nil
+			if err := r.propose(&cr, dep); err != nil {
+				return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, err.Error())
+			}
+			st.Phase, st.Message = approvalv1alpha1.PhaseNeedsReapproval, "re-proposed with a review hash and expiry: approve again"
+			return ctrl.Result{}, r.save(ctx, &cr, base)
+		}
+		// Expiry is judged by the controller's clock, never by a time a
+		// client wrote (P2-12).
+		if remaining := st.ExpiresAt.Sub(r.now()); remaining <= 0 {
+			st.Approval = nil
+			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseExpired,
+				fmt.Sprintf("no valid approval before %s", st.ExpiresAt.UTC().Format(time.RFC3339)))
+		} else if st.Approval == nil {
+			return ctrl.Result{RequeueAfter: remaining}, nil // expire on time even if nobody answers
 		}
 		if st.Approval.Decision == approvalv1alpha1.DecisionRejected {
-			return r.finish(ctx, &cr, approvalv1alpha1.PhaseRejected, "rejected by "+st.Approval.Approver)
+			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseRejected, "rejected by "+st.Approval.Approver)
+		}
+		// The approval must be for exactly the packet the controller
+		// currently holds. One made for an earlier plan (before drift) or
+		// any other hash is discarded, not applied (P2-12).
+		if st.Approval.ReviewHash != st.ReviewHash {
+			st.Message = fmt.Sprintf("discarded an approval by %s for review hash %s; the current plan's hash is %s: review again",
+				st.Approval.Approver, st.Approval.ReviewHash, st.ReviewHash)
+			st.Approval = nil
+			log.Info("hash mismatch", "message", st.Message)
+			return ctrl.Result{}, r.save(ctx, &cr, base)
 		}
 		if err := CheckScope(cr.Spec); err != nil { // the spec is immutable, but check again before writing
-			return r.finish(ctx, &cr, approvalv1alpha1.PhaseRejected, err.Error())
+			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseRejected, err.Error())
 		}
 		dep, err := r.target(ctx, cr.Spec.Action.Target)
 		if err != nil {
-			return r.finish(ctx, &cr, approvalv1alpha1.PhaseFailed, fmt.Sprintf("reading target: %v", err))
+			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, fmt.Sprintf("reading target: %v", err))
 		}
 		// Time-of-check/time-of-use: the human approved a plan computed
 		// from the recorded pre-state. If the target changed since, that
@@ -96,60 +129,105 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			before := *st.PreState
 			st.Approval = nil
 			if err := r.propose(&cr, dep); err != nil {
-				return r.finish(ctx, &cr, approvalv1alpha1.PhaseFailed, err.Error())
+				return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, err.Error())
 			}
 			st.Phase = approvalv1alpha1.PhaseNeedsReapproval
 			st.Message = fmt.Sprintf("target changed since it was reviewed (generation %d -> %d, replicas %d -> %d): re-approve the new plan",
 				before.Generation, live.Generation, before.Replicas, live.Replicas)
 			log.Info("drift", "message", st.Message)
-			return ctrl.Result{}, r.Status().Update(ctx, &cr)
+			return ctrl.Result{}, r.save(ctx, &cr, base)
 		}
 		// Mark Applying before touching the target, so the record of what
 		// is about to run exists even if we crash mid-apply (P2-05).
 		st.Phase = approvalv1alpha1.PhaseApplying
 		st.Message = "applying the recorded plan"
-		if err := r.Status().Update(ctx, &cr); err != nil {
+		if err := r.save(ctx, &cr, base); err != nil {
 			return ctrl.Result{}, err // usually a conflict: retried with fresh state
 		}
-		return r.apply(ctx, &cr)
+		return r.apply(ctx, &cr, base)
 
 	case approvalv1alpha1.PhaseApplying:
 		// We crashed (or a status update failed) after deciding to apply.
 		// The plan is a merge patch with fixed values, so applying it again
 		// is idempotent.
-		return r.apply(ctx, &cr)
+		return r.apply(ctx, &cr, base)
 	}
 	return ctrl.Result{}, nil
 }
 
-func (r *ChangeRequestReconciler) apply(ctx context.Context, cr *approvalv1alpha1.ChangeRequest) (ctrl.Result, error) {
+func (r *ChangeRequestReconciler) apply(ctx context.Context, cr, base *approvalv1alpha1.ChangeRequest) (ctrl.Result, error) {
 	t := cr.Spec.Action.Target
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: t.Namespace, Name: t.Name}}
 	if err := r.Patch(ctx, dep, client.RawPatch(types.MergePatchType, []byte(cr.Status.Plan))); err != nil {
-		return r.finish(ctx, cr, approvalv1alpha1.PhaseFailed, fmt.Sprintf("applying plan: %v", err))
+		return r.finish(ctx, cr, base, approvalv1alpha1.PhaseFailed, fmt.Sprintf("applying plan: %v", err))
 	}
 	now := metav1.NewTime(r.now())
 	cr.Status.AppliedAt = &now
 	logf.FromContext(ctx).Info("applied", "plan", cr.Status.Plan)
-	return r.finish(ctx, cr, approvalv1alpha1.PhaseApplied, "applied; rollbackPlan undoes it")
+	return r.finish(ctx, cr, base, approvalv1alpha1.PhaseApplied, "applied; rollbackPlan undoes it")
 }
 
-// propose records the target's pre-state, and the exact patch and rollback
-// patch computed from it.
+// propose records the target's pre-state, the exact patch and rollback
+// patch computed from it, the hash an approval must carry, and the expiry.
 func (r *ChangeRequestReconciler) propose(cr *approvalv1alpha1.ChangeRequest, dep *appsv1.Deployment) error {
 	pre := Observe(dep)
-	plan, rollback, err := Plan(cr.Spec.Action, pre, r.now())
+	now := r.now()
+	plan, rollback, err := Plan(cr.Spec.Action, pre, now)
 	if err != nil {
 		return err
 	}
-	cr.Status.PreState, cr.Status.Plan, cr.Status.RollbackPlan = &pre, plan, rollback
+	st := &cr.Status
+	st.PreState, st.Plan, st.RollbackPlan = &pre, plan, rollback
+	if st.ReviewHash, err = ReviewHash(cr); err != nil {
+		return err
+	}
+	window := cr.Spec.ApprovalWindowSeconds
+	if window <= 0 {
+		window = 3600
+	}
+	expires := metav1.NewTime(now.Add(time.Duration(window) * time.Second))
+	st.ExpiresAt = &expires
 	return nil
 }
 
-func (r *ChangeRequestReconciler) finish(ctx context.Context, cr *approvalv1alpha1.ChangeRequest, phase approvalv1alpha1.Phase, msg string) (ctrl.Result, error) {
+// ReviewHash covers everything an approver reviews: which object (UID, so
+// a deleted and re-created namesake doesn't inherit approvals), the
+// proposal, and the controller's pre-state, plan and rollback.
+func ReviewHash(cr *approvalv1alpha1.ChangeRequest) (string, error) {
+	b, err := json.Marshal(struct {
+		UID          types.UID                          `json:"uid"`
+		Spec         approvalv1alpha1.ChangeRequestSpec `json:"spec"`
+		PreState     *approvalv1alpha1.TargetState      `json:"preState"`
+		Plan         string                             `json:"plan"`
+		RollbackPlan string                             `json:"rollbackPlan"`
+	}{cr.UID, cr.Spec, cr.Status.PreState, cr.Status.Plan, cr.Status.RollbackPlan})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+func (r *ChangeRequestReconciler) finish(ctx context.Context, cr, base *approvalv1alpha1.ChangeRequest, phase approvalv1alpha1.Phase, msg string) (ctrl.Result, error) {
 	cr.Status.Phase, cr.Status.Message = phase, msg
 	logf.FromContext(ctx).Info("finished", "phase", phase, "message", msg)
-	return ctrl.Result{}, r.Status().Update(ctx, cr)
+	return ctrl.Result{}, r.save(ctx, cr, base)
+}
+
+// save writes the controller's status changes as a merge patch against
+// base, the last state the controller read or wrote, with resourceVersion
+// as a precondition. Only fields the controller changed are sent. A full
+// Update re-serializes the whole status, and a human's approval that
+// doesn't round-trip byte for byte through the Go type (an empty
+// "comment", say) would look changed, which the admission policy rightly
+// refuses from the controller. A human writing concurrently still causes a
+// conflict and a retry, never an overwrite.
+func (r *ChangeRequestReconciler) save(ctx context.Context, cr, base *approvalv1alpha1.ChangeRequest) error {
+	if err := r.Status().Patch(ctx, cr, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
+		return err
+	}
+	*base = *cr.DeepCopy()
+	return nil
 }
 
 func (r *ChangeRequestReconciler) target(ctx context.Context, t approvalv1alpha1.TargetRef) (*appsv1.Deployment, error) {
