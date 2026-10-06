@@ -102,3 +102,38 @@ func TestObserveAndDrift(t *testing.T) {
 		t.Errorf("nil replicas observed as %d", got)
 	}
 }
+
+func TestReviewHash(t *testing.T) {
+	cr := &v1.ChangeRequest{Spec: spec("workloads", "Deployment", []string{"workloads"}, []string{"Deployment"})}
+	cr.UID = "uid-1"
+	cr.Status.PreState = &v1.TargetState{Generation: 1, Replicas: 1}
+	cr.Status.Plan, cr.Status.RollbackPlan = `{"spec":{"replicas":2}}`, `{"spec":{"replicas":1}}`
+	h1, err := ReviewHash(cr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h2, _ := ReviewHash(cr); h1 != h2 || len(h1) != len("sha256:")+64 {
+		t.Fatalf("not stable or malformed: %s %s", h1, h2)
+	}
+	// Each reviewed part changes the hash.
+	mutations := map[string]func(c *v1.ChangeRequest){
+		"uid":      func(c *v1.ChangeRequest) { c.UID = "uid-2" },
+		"spec":     func(c *v1.ChangeRequest) { c.Spec.Intent = "other" },
+		"preState": func(c *v1.ChangeRequest) { c.Status.PreState = &v1.TargetState{Generation: 2, Replicas: 1} },
+		"plan":     func(c *v1.ChangeRequest) { c.Status.Plan = `{"spec":{"replicas":9}}` },
+		"rollback": func(c *v1.ChangeRequest) { c.Status.RollbackPlan = `{"spec":{"replicas":0}}` },
+	}
+	for name, mutate := range mutations {
+		c := cr.DeepCopy()
+		mutate(c)
+		if h, _ := ReviewHash(c); h == h1 {
+			t.Errorf("changing %s didn't change the hash", name)
+		}
+	}
+	// Status fields outside the review (phase, approval) don't.
+	c := cr.DeepCopy()
+	c.Status.Phase, c.Status.Message = v1.PhaseApplying, "x"
+	if h, _ := ReviewHash(c); h != h1 {
+		t.Error("phase/message changed the hash")
+	}
+}

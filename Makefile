@@ -134,7 +134,7 @@ kata:
 # P2: ChangeRequest CRD, approval controller, agent's proposer role, demo
 # workload. Builds the controller on the host and loads it into kind.
 p2:
-	$(MAKE) -C $(P2) kind-load CLUSTER=$(CLUSTER)
+	$(MAKE) -C $(P2) kind-load cli CLUSTER=$(CLUSTER)
 	$(KUBECTL) apply -f $(P2)/manifests/00-namespaces.yaml
 	$(KUBECTL) apply -f $(P2)/config/crd/bases/ -f $(P2)/config/rbac/role.yaml -f $(P2)/manifests/
 	$(KUBECTL) -n approval-system rollout restart deploy/approval-controller

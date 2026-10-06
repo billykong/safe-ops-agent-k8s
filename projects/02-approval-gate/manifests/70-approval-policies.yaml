@@ -1,0 +1,94 @@
+# Who may approve, and under what name (P2-11). Both policies apply to every
+# write of changerequests/status, so RBAC alone (which can only say "may
+# update status") isn't the whole story.
+#
+# 1. Mutating: whenever an approval is set or changed, overwrite its
+#    approver with the authenticated username. The object's own field
+#    can't name someone else.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: changerequest-approver-identity
+spec:
+  failurePolicy: Fail
+  reinvocationPolicy: Never
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["approval.safe-ops.io"]
+      apiVersions: ["*"]
+      resources: ["changerequests/status"]
+      operations: ["UPDATE"]
+  matchConditions:
+  - name: approval-set-or-changed
+    expression: >-
+      has(object.status) && has(object.status.approval) &&
+      (oldObject.?status.?approval != object.?status.?approval)
+  mutations:
+  - patchType: JSONPatch
+    jsonPatch:
+      expression: >-
+        [JSONPatch{op: "add", path: "/status/approval/approver", value: request.userInfo.username}]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: changerequest-approver-identity
+spec:
+  policyName: changerequest-approver-identity
+---
+# 2. Validating:
+#    - setting or changing an approval needs a human in safe-ops:approvers
+#      (not a service account, even one given that group), under their own
+#      name;
+#    - only the controller may withdraw an approval (it does so on drift,
+#      hash mismatch or expiry);
+#    - only the controller may write the fields it owns. Otherwise an
+#      approver could rewrite status.plan, which is what gets applied.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: changerequest-approval-authority
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["approval.safe-ops.io"]
+      apiVersions: ["*"]
+      resources: ["changerequests/status"]
+      operations: ["UPDATE"]
+  variables:
+  - name: controller
+    expression: "request.userInfo.username == 'system:serviceaccount:approval-system:approval-controller'"
+  - name: approvalChanged
+    expression: "has(object.status) && has(object.status.approval) && oldObject.?status.?approval != object.?status.?approval"
+  - name: approvalRemoved
+    expression: "!(has(object.status) && has(object.status.approval)) && has(oldObject.status) && has(oldObject.status.approval)"
+  validations:
+  - expression: >-
+      !variables.approvalChanged ||
+      ('safe-ops:approvers' in request.userInfo.groups && !request.userInfo.username.startsWith('system:'))
+    message: "approving needs an authenticated human in group safe-ops:approvers (not a service account)"
+  - expression: "!variables.approvalChanged || object.status.approval.approver == request.userInfo.username"
+    message: "approver must be the authenticated user"
+  - expression: "!variables.approvalRemoved || variables.controller"
+    message: "only the approval controller may withdraw an approval; reject the request instead"
+  - expression: >-
+      variables.controller || (
+        oldObject.?status.?phase == object.?status.?phase &&
+        oldObject.?status.?message == object.?status.?message &&
+        oldObject.?status.?preState == object.?status.?preState &&
+        oldObject.?status.?plan == object.?status.?plan &&
+        oldObject.?status.?rollbackPlan == object.?status.?rollbackPlan &&
+        oldObject.?status.?reviewHash == object.?status.?reviewHash &&
+        oldObject.?status.?expiresAt == object.?status.?expiresAt &&
+        oldObject.?status.?appliedAt == object.?status.?appliedAt &&
+        oldObject.?status.?conditions == object.?status.?conditions)
+    message: "only the approval controller may change status fields other than approval"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: changerequest-approval-authority
+spec:
+  policyName: changerequest-approval-authority
+  validationActions: [Deny]
