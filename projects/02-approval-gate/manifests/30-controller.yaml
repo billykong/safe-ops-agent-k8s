@@ -20,10 +20,13 @@ spec:
         # Built by `make p2` and loaded into kind; never pulled.
         image: approval-controller:dev
         imagePullPolicy: Never
-        # Metrics and health endpoints off: default-deny ingress here, and
-        # kubelet HTTP probes are dropped as "world" on this cluster (P1
-        # README finding 6). One replica, so no leader election.
-        args: ["--metrics-bind-address=0", "--health-probe-bind-address=0"]
+        # Health endpoint off: kubelet HTTP probes are dropped as "world" on
+        # this cluster (P1 README finding 6). Metrics on, for the oversight
+        # metrics (P2-42), over plain HTTP: the namespace's default-deny
+        # ingress admits no scraper yet, so only a port-forward reaches it
+        # (P4 adds scraping, with authentication). One replica, so no
+        # leader election.
+        args: ["--metrics-bind-address=:8080", "--metrics-secure=false", "--health-probe-bind-address=0"]
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true

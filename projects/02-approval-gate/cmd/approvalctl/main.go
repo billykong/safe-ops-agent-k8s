@@ -2,9 +2,10 @@
 //
 //	approvalctl [--kubeconfig F] [--context C] [-n NS] list
 //	approvalctl ... show NAME
-//	approvalctl ... approve NAME [--comment TEXT] [--yes] [--wait 30s]
+//	approvalctl ... approve NAME [--comment TEXT] [--yes] [--wait 30s] [--accept-critical]
 //	approvalctl ... reject  NAME [--comment TEXT] [--yes] [--wait 30s]
 //	approvalctl ... budget
+//	approvalctl ... stats
 //
 // approve/reject show the review packet the controller recorded, ask for
 // confirmation, then write the decision to the status subresource with the
@@ -13,8 +14,16 @@
 // approving something you didn't see. The cluster records you as the
 // approver from your authenticated identity, whatever this tool sends.
 //
+// The packet shows what the controller computed from the cluster first
+// (diff from a server-side dry run, blast radius, rule findings, rollback
+// check, budget), and the agent's own account last, labelled as unverified
+// (P2-40). Approving a request with a Critical finding needs
+// --accept-critical.
+//
 // budget shows the namespace's change budget: how many changes the
-// controller may still apply without a human, and which ones.
+// controller may still apply without a human, and which ones. stats shows
+// the oversight metrics (P2-42): outcomes, time to decide, and per-approver
+// approval rates, including approvals of flagged requests.
 package main
 
 import (
@@ -23,7 +32,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -37,13 +48,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	v1 "github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/api/v1alpha1"
+	"github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/internal/oversight"
 )
 
 func main() {
 	kctx := flag.String("context", "", "kubeconfig context")
 	ns := flag.String("n", "approvals", "namespace")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: approvalctl [--kubeconfig F] [--context C] [-n NS] list | show NAME | approve NAME | reject NAME | budget")
+		fmt.Fprintln(os.Stderr, "usage: approvalctl [--kubeconfig F] [--context C] [-n NS] list | show NAME | approve NAME | reject NAME | budget | stats")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -67,21 +79,24 @@ func main() {
 	case "show":
 		need(args, 2)
 		cr := get(ctx, c, *ns, args[1])
-		printPacket(os.Stdout, cr)
+		printPacket(os.Stdout, cr, budgetLine(ctx, c, *ns))
 	case "budget":
 		budget(ctx, c, *ns)
+	case "stats":
+		stats(ctx, c, *ns)
 	case "approve", "reject":
 		need(args, 2)
 		fs := flag.NewFlagSet(args[0], flag.ExitOnError)
 		comment := fs.String("comment", "", "comment recorded with the decision")
 		yes := fs.Bool("yes", false, "don't ask for confirmation")
 		wait := fs.Duration("wait", 30*time.Second, "how long to wait for the controller's outcome")
+		acceptCritical := fs.Bool("accept-critical", false, "approve even though the review found Critical problems")
 		die(fs.Parse(args[2:]))
 		decision := v1.DecisionApproved
 		if args[0] == "reject" {
 			decision = v1.DecisionRejected
 		}
-		decide(ctx, c, *ns, args[1], decision, *comment, *yes, *wait)
+		decide(ctx, c, *ns, args[1], decision, *comment, *yes, *wait, *acceptCritical)
 	default:
 		flag.Usage()
 		os.Exit(2)
@@ -108,7 +123,7 @@ func list(ctx context.Context, c client.Client, ns string) {
 	die(w.Flush())
 }
 
-func decide(ctx context.Context, c client.Client, ns, name string, d v1.Decision, comment string, yes bool, wait time.Duration) {
+func decide(ctx context.Context, c client.Client, ns, name string, d v1.Decision, comment string, yes bool, wait time.Duration, acceptCritical bool) {
 	cr := get(ctx, c, ns, name)
 	st := cr.Status
 	if st.Phase != v1.PhasePending && st.Phase != v1.PhaseNeedsReapproval {
@@ -120,7 +135,14 @@ func decide(ctx context.Context, c client.Client, ns, name string, d v1.Decision
 	if time.Now().After(st.ExpiresAt.Time) {
 		fail("%s expired at %s", name, st.ExpiresAt.UTC().Format(time.RFC3339))
 	}
-	printPacket(os.Stdout, cr)
+	printPacket(os.Stdout, cr, budgetLine(ctx, c, ns))
+	if d == v1.DecisionApproved && st.Review != nil && !acceptCritical {
+		for _, f := range st.Review.Findings {
+			if f.Severity == v1.SeverityCritical {
+				fail("%s has Critical findings (above); reject it, or approve with --accept-critical if you've checked them", name)
+			}
+		}
+	}
 	if !yes {
 		fmt.Printf("\n%s exactly this plan (review hash %s)? [y/N] ", strings.ToLower(string(d[:len(d)-1])), short(st.ReviewHash))
 		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
@@ -163,30 +185,24 @@ func decide(ctx context.Context, c client.Client, ns, name string, d v1.Decision
 	}
 }
 
-func printPacket(out *os.File, cr *v1.ChangeRequest) {
+func printPacket(out *os.File, cr *v1.ChangeRequest, budget string) {
 	s, st, a := cr.Spec, cr.Status, cr.Spec.Action
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	row := func(k, v string) { fmt.Fprintf(w, "%s\t%s\n", k, v) }
+	more := func(v string) { row("", v) }
 	row("ChangeRequest", cr.Namespace+"/"+cr.Name)
 	row("phase", string(st.Phase))
 	if st.Message != "" {
 		row("message", st.Message)
 	}
 	fmt.Fprintln(w, "\t")
-	row("AGENT'S ACCOUNT", "(free text, not verified)")
-	row("intent", s.Intent)
-	row("blast radius", s.BlastRadius)
-	row("rollback", s.Rollback)
-	fmt.Fprintln(w, "\t")
-	row("REQUESTED ACTION", "(typed and schema-checked)")
+	row("COMPUTED BY THE CONTROLLER", "(from the cluster, by code; this is what runs)")
 	act := fmt.Sprintf("%s %s %s/%s", a.Type, a.Target.Kind, a.Target.Namespace, a.Target.Name)
 	if a.Replicas != nil {
 		act += fmt.Sprintf(" replicas=%d", *a.Replicas)
 	}
-	row("action", act)
+	row("action", act+"  (typed, schema-checked)")
 	row("scope", fmt.Sprintf("namespaces %v, kinds %v", s.Scope.Namespaces, s.Scope.Kinds))
-	fmt.Fprintln(w, "\t")
-	row("COMPUTED BY THE CONTROLLER", "(exact; this is what runs)")
 	if p := st.PreState; p != nil {
 		rs := p.RestartedAt
 		if rs == "" {
@@ -194,8 +210,40 @@ func printPacket(out *os.File, cr *v1.ChangeRequest) {
 		}
 		row("pre-state", fmt.Sprintf("generation %d, replicas %d, restartedAt %s", p.Generation, p.Replicas, rs))
 	}
+	if rv := st.Review; rv != nil {
+		if len(rv.Diff) == 0 {
+			row("diff", "(none)")
+		}
+		for i, d := range rv.Diff {
+			k := ""
+			if i == 0 {
+				k = "diff"
+			}
+			row(k, fmt.Sprintf("%s: %s -> %s", d.Path, orNone(d.From), orNone(d.To)))
+		}
+		row("dry run", rv.DryRun)
+		br := rv.BlastRadius
+		row("blast radius", br.Summary)
+		more(fmt.Sprintf("ready now %d of %d; disruption budgets: %s", br.ReadyBefore, br.ReplicasBefore, orNone(strings.Join(br.DisruptionBudgets, ", "))))
+		if len(rv.Findings) == 0 {
+			row("findings", "(none)")
+		}
+		for i, f := range rv.Findings {
+			k := ""
+			if i == 0 {
+				k = "findings"
+			}
+			row(k, fmt.Sprintf("%s %s: %s", strings.ToUpper(string(f.Severity)), f.Code, f.Message))
+		}
+	} else {
+		row("review", "(not computed yet)")
+	}
 	row("plan", st.Plan)
 	row("rollback plan", st.RollbackPlan)
+	if st.Review != nil {
+		row("rollback check", st.Review.RollbackCheck)
+	}
+	row("budget", budget)
 	row("review hash", st.ReviewHash)
 	if st.ExpiresAt != nil {
 		row("expires", fmt.Sprintf("%s (in %s)", st.ExpiresAt.UTC().Format(time.RFC3339), expiresIn(cr)))
@@ -206,7 +254,74 @@ func printPacket(out *os.File, cr *v1.ChangeRequest) {
 	if g := st.BudgetGrant; g != nil {
 		row("decision", fmt.Sprintf("approved by change budget %s at %s (no human)", g.Budget, g.Time.UTC().Format(time.RFC3339)))
 	}
+	fmt.Fprintln(w, "\t")
+	row("PROPOSER'S ACCOUNT", "(free text from the agent, not verified: weigh it last)")
+	row("intent", s.Intent)
+	row("blast radius", s.BlastRadius+"  (claimed)")
+	row("rollback", s.Rollback+"  (claimed)")
 	die(w.Flush())
+}
+
+func orNone(v string) string {
+	if v == "" {
+		return "(none)"
+	}
+	return v
+}
+
+// budgetLine summarises the change budget right now, for the packet.
+func budgetLine(ctx context.Context, c client.Client, ns string) string {
+	var b v1.ChangeBudget
+	err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: v1.DefaultBudgetName}, &b)
+	if apierrors.IsNotFound(err) {
+		return "no change budget: every change needs an approver"
+	}
+	if err != nil {
+		return "unknown: " + err.Error()
+	}
+	window := time.Duration(b.Spec.WindowSeconds) * time.Second
+	used := 0
+	for _, g := range b.Status.Grants {
+		if time.Since(g.Time.Time) < window {
+			used++
+		}
+	}
+	return fmt.Sprintf("%d of %d autonomous changes left in the last %s", max(int(b.Spec.MaxChanges)-used, 0), b.Spec.MaxChanges, window)
+}
+
+func stats(ctx context.Context, c client.Client, ns string) {
+	var l v1.ChangeRequestList
+	die(c.List(ctx, &l, client.InNamespace(ns)))
+	r := oversight.Compute(l.Items)
+	phases := []string{}
+	for p, n := range r.ByPhase {
+		phases = append(phases, fmt.Sprintf("%s %d", p, n))
+	}
+	sort.Strings(phases)
+	fmt.Printf("ChangeRequests in %s: %d (%s)\n", ns, r.Total, strings.Join(phases, ", "))
+	fmt.Printf("settled by: humans %d, change budget %d, controller %d, expiry %d, kill switch %d\n",
+		r.ByHuman, r.ByBudget, r.ByController, r.Expired, r.Cancelled)
+	fmt.Printf("re-proposed after drift: %d\n", r.Reproposed)
+	fmt.Printf("time to decision: humans median %s, p90 %s; change budget median %s\n\n",
+		dur(oversight.Quantile(r.HumanSeconds, 0.5)), dur(oversight.Quantile(r.HumanSeconds, 0.9)), dur(oversight.Quantile(r.BudgetSeconds, 0.5)))
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "APPROVER\tAPPROVED\tREJECTED\tAPPROVAL RATE\tMEDIAN TIME\tP90 TIME\tAPPROVED FLAGGED\tAPPROVED CRITICAL")
+	for _, a := range r.Approvers {
+		rate := "-"
+		if v := a.ApprovalRate(); !math.IsNaN(v) {
+			rate = fmt.Sprintf("%.0f%%", 100*v)
+		}
+		fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%s\t%d\t%d\n", a.Name, a.Approved, a.Rejected, rate,
+			dur(oversight.Quantile(a.Seconds, 0.5)), dur(oversight.Quantile(a.Seconds, 0.9)), a.ApprovedFlagged, a.ApprovedCritical)
+	}
+	die(w.Flush())
+}
+
+func dur(secs float64) string {
+	if math.IsNaN(secs) {
+		return "-"
+	}
+	return (time.Duration(secs) * time.Second).Round(time.Second).String()
 }
 
 func budget(ctx context.Context, c client.Client, ns string) {

@@ -9,9 +9,9 @@ Requirements and status: [docs/prd/projects/p2-approval-gate.md](../../docs/prd/
 1. [x] `ChangeRequest` CRD with immutable spec, status-subresource approval, and the controller (kubebuilder)
 2. [x] Approval CLI (`approvalctl`) with authenticated approver identity; hash binding and expiry. `make p2 test-approval`: 58 checks
 3. [x] Admission guard rejecting direct writes by the agent's identity (a ValidatingAdmissionPolicy). `make test-agent-guard`: 33 checks
-4. [x] Change budget and kill switch, with a runbook. `make test-budget`: 33 checks; `make test-kill-switch`: 46 checks
+4. [x] Change budget and kill switch, with a runbook. `make test-budget`: 34 checks; `make test-kill-switch`: 42 checks
 5. [x] Durable execution across long approvals, with Temporal; pod-restart demo. `make durable test-durable`: 40 checks
-6. [ ] Deterministic approval packet and oversight metrics
+6. [x] Computed review packet and oversight metrics. `make test-review`: 38 checks
 
 ## How it works
 
@@ -24,8 +24,8 @@ sequenceDiagram
   participant W as workloads/web
   A->>K: create ChangeRequest (spec immutable)
   K-->>C: watch
-  C->>W: get (live state)
-  C->>K: status: Pending, preState, plan, rollbackPlan
+  C->>W: get (live state), dry run of the plan
+  C->>K: status: Pending, preState, plan, rollbackPlan, review packet
   H->>K: patch status.approval (subresource)
   K-->>C: watch
   C->>W: get: drifted from preState?
@@ -48,7 +48,14 @@ sequenceDiagram
 - **Approvers authenticate with client certificates** (`scripts/new-approver.sh NAME`): CN is the username, O is `safe-ops:approvers`. The key is generated locally; the cluster's CSR API signs it; the result is a standalone kubeconfig. A cluster admin who isn't in the group can't approve, short of editing the policies.
 - **Hash binding.** `status.reviewHash` is a sha256 over the request's UID, spec, pre-state, plan and rollback plan: everything the approver sees. An approval must carry it; one for any other hash is discarded with an explanation. Re-planning after drift changes the hash, so earlier approvals can't be replayed.
 - **Expiry.** `status.expiresAt` = proposal time + `spec.approvalWindowSeconds` (default 1 h, max 1 day), judged by the controller's clock. Unanswered requests expire on time (the controller requeues for it); late approvals apply nothing. The approval's own `time` is informational: admission policy CEL has no clock, so a client-written time can't be trusted.
-- **`approvalctl`** (`cmd/approvalctl`): `list`, `show`, `approve`, `reject`. It shows the packet in three parts (the agent's free-text account, the typed action, and what the controller computed and will run), asks for confirmation, and writes the decision with the review hash, conditional on the `resourceVersion` it displayed.
+- **`approvalctl`** (`cmd/approvalctl`): `list`, `show`, `approve`, `reject`, `budget`, `stats`. It shows the packet with what the controller computed first and the agent's free-text account last, asks for confirmation, and writes the decision with the review hash, conditional on the `resourceVersion` it displayed.
+- **Review packet** (`internal/controller/review.go`, P2-40). At every proposal the controller builds `status.review` from the cluster, with no model involved:
+  - a **server-side dry run** of the exact plan, admission included, and the **field diff** between the live object and the dry run's result (so defaulting and mutating admission show up);
+  - the **blast radius** computed from the live object: pods added, removed or replaced, how many a rollout may take down at once, and the PodDisruptionBudgets that select the pods;
+  - **findings** from fixed rules: `DryRunRefused`, `ScaleToZero` and `BelowDisruptionBudget` (Critical); `LargeScaleUp`, `LargeScaleDown`, `RolloutTakesAllPods`, `TargetDegraded` and `RolloutInProgress` (Warning); `NoChange` (Info);
+  - a **rollback check**: the rollback patch applied to the dry run's result must restore every reviewed field of the pre-state.
+  The packet is covered by the review hash, so an approval binds to it, and only the controller may write it. The same state always gives the same packet. `approvalctl show` adds the change budget's remaining capacity, and labels the agent's blast radius and rollback as claimed. Approving a request with a Critical finding needs `--accept-critical`. The change budget pays only for requests with no Warning or Critical findings (P2-44).
+- **Oversight metrics** (`internal/oversight`, P2-42). Recomputed from the ChangeRequests on every call, never counted in memory: per approver, approvals, rejections, approval rate, time from proposal to decision (median, p90), and approvals of requests with Warning or Critical findings (a rubber-stamping signal); overall, outcomes by what settled them (humans, change budget, controller, expiry, kill switch) and re-proposals after drift. `approvalctl stats` prints them. The controller exports them as Prometheus metrics (`safeops_approver_decisions`, `safeops_approver_approvals_flagged`, `safeops_changerequest_time_to_decision_seconds`, `safeops_changerequest_outcomes`, ...) on :8080, which the namespace's default-deny ingress keeps unreachable except by port-forward until P4 adds scraping. The controller records `proposedAt`, `decidedAt` and the proposal count for this.
 - **Time of check vs time of use.** Before applying, the controller compares the target's live state with the recorded pre-state. If anything changed (any spec edit bumps the generation), it clears the approval, re-proposes from live state, and waits in `NeedsReapproval`.
 - **Scope.** An action outside its declared scope is rejected, and a later approval doesn't revive it.
 - **Backstop on the agent's writes** (`manifests/80-agent-write-guard.yaml`). A ValidatingAdmissionPolicy matched only to the agent's identity refuses every create, update, delete or connect (exec included) outside an allowlist: create/delete SandboxClaims in `sandboxes`, create ChangeRequests in `approvals`, and self-review calls. It fails closed. If the agent's RBAC is ever widened by mistake, it still can't change the cluster except by proposing. A policy rather than a webhook: same admission point, but evaluated in the API server, with no TLS or extra service to fail. It can't protect admission configuration itself ([GAP-02](../../docs/known-gaps.md#gap-02-admission-guards-cant-protect-their-own-configuration)).
@@ -83,17 +90,25 @@ sequenceDiagram
 13. **Which policy reports a denial isn't stable.** After the policies were re-applied, a status write by the agent's identity was refused by `agent-write-guard` rather than the approval policy, failing a test that expected the latter's message. Both refusals were correct. The check now uses a different service account, so it tests the approval policy alone.
 14. **The budget is consulted once.** A request that wasn't eligible or found the budget spent keeps waiting for a human, even after the window frees budget, so nothing changes under an approver who's reviewing it. The controller runs one worker, so concurrent proposals are paid for one at a time; the precondition on the budget's `resourceVersion` is what keeps more workers or replicas from overspending.
 
-15. **Kubelet probes arrive as `world` under this Cilium setup.** Temporal's `tcpSocket` readiness probe timed out: Cilium's drop log showed the SYNs from the host's address (`10.244.0.1`) classed as `world`, and the namespace's default-deny ingress dropped them. Nothing earlier had a network probe behind a default-deny ingress (P1's sandboxes use exec probes). Temporal now has an exec probe.
+15. **Kubelet probes arrive as `world` under this Cilium setup** (P1 README finding 6 again). Temporal's `tcpSocket` readiness probe timed out: Cilium's drop log showed the SYNs from the host's address (`10.244.0.1`) classed as `world`, and the namespace's default-deny ingress dropped them. The controller's manifest already noted this for HTTP probes; it applies to every network probe here. Temporal now has an exec probe.
 16. **Blocked DNS stalled a server that needs no DNS.** Temporal talks to itself on localhost, but its gRPC clients still look up TXT and SRV records for `localhost` through every search domain. With egress denied, the queries were dropped, each internal call waited out the resolver timeout, and the server never became healthy. Pointing its resolver at `127.0.0.1` (nothing listens) with no search domains makes them fail at once. Cilium's drop log showed the queries; a temporary DNS-proxy policy with `matchPattern: "*"` named them.
 17. **A second, optional workflow parameter turned the first into a dict.** The Temporal Python SDK ignores a workflow's parameter types when the number of inputs differs from the number of parameters, so `run(task, progress=None)` started with one input received `task` as a plain dict. The workflow takes one dataclass, and the continue-as-new progress is a field in it.
 18. **The worker ignored SIGTERM while connecting.** Its handler was installed after `Client.connect`, which retries while Temporal is down; as PID 1 it ignored SIGTERM and hung in `Terminating`. The P1 finding again, in a new place. The handler now goes first, and stopping cancels the connect.
 19. **The kill switch stopped halfway when a workflow raced it.** One finished between being listed and being terminated; the error aborted the script under `set -e`, so the worker was never scaled down. The workflow step now reports failures and never aborts, and the test caught it because it checks every layer after a stop, not just the step it added.
 
-## Not yet (next milestones)
-- The review packet has no server-side dry run, policy findings or tested rollback yet (milestone 6).
+20. **The review rules changed what the budget pays for, as intended, and broke the budget suite.** A restart proposed right after an autonomous scale-up found the new pod not yet ready (`TargetDegraded`), so the budget declined it; a 3 to 1 scale-down is now `LargeScaleDown`. Both are the rules working. The suite now waits for the target to settle before each autonomous proposal, and checks explicitly that a flagged change isn't paid for.
+21. **An absent map and an empty one diff as different.** A rollback that removes the only restart annotation leaves `annotations: {}`, while the pre-state had no `annotations` at all; the first rollback check reported that as a change. The diff now descends into a map when the other side has none. Numbers needed the same care: the object converter yields `int64`, JSON `float64`, so the rollback check compares JSON with JSON.
+22. **Approving a stale proposal in a test hit drift, correctly.** A request reviewed before another change scaled the target re-proposed on approval instead of applying. The test now decides on a fresh proposal; the behaviour is P2-04 doing its job.
+23. **Backgrounding a shell function loses the process.** `kubectl port-forward ... &` through `scripts/lib.sh`'s context-pinning `kubectl` function backgrounds a subshell; `$!` is the subshell, and killing it left the port-forward running after the test. The test backgrounds the `kubectl` binary itself (`command kubectl --context ...`).
+24. **The kill-switch suite has 42 checks, not 46.** The count reported in milestone 4 was a miscount; the suite is unchanged.
+
+## Not yet
+- Seeded known-bad proposals to measure approvers' catch rate (P2-43): P4's eval suite.
+- Rollback is a new proposal of the inverse action; there's no one-step "roll back request X" action.
+- Metrics aren't scraped yet (P4).
 
 ## Layout
-Kubebuilder layout, trimmed to what's used: `api/` (types), `internal/controller/` (reconciler and its pure decision functions, unit-tested in `logic_test.go`), `config/crd/bases/` and `config/rbac/role.yaml` (generated by `make manifests`), `manifests/` (hand-written deployment: namespaces, bindings, controller, agent role, network policy, demo workload). Kustomize overlays aren't used: their namespace rewrite would move the controller's `workloads` Role into its own namespace. `durable/` holds milestone 5: the agent worker (`agent/`: workflow, activities, worker; Python, `temporalio`) and its manifests (Temporal, network policy, worker Deployment), deployed by `make durable`, separate from `make p2`.
+Kubebuilder layout, trimmed to what's used: `api/` (types), `internal/controller/` (reconciler and its pure decision functions: `bounds.go` for the budget and kill switch, `review.go` for the packet; unit-tested), `internal/oversight/` (metrics computed from the record; unit-tested), `config/crd/bases/` and `config/rbac/role.yaml` (generated by `make manifests`), `manifests/` (hand-written deployment: namespaces, bindings, controller, agent role, network policy, demo workload). Kustomize overlays aren't used: their namespace rewrite would move the controller's `workloads` Role into its own namespace. `durable/` holds milestone 5: the agent worker (`agent/`: workflow, activities, worker; Python, `temporalio`) and its manifests (Temporal, network policy, worker Deployment), deployed by `make durable`, separate from `make p2`.
 
 The controller binary is built on the host (`make build`; Go from `scripts/setup-go.sh`) and copied into a distroless image, rather than compiled inside a large Go builder image.
 
@@ -103,10 +118,12 @@ The controller binary is built on the host (`make build`; Go from `scripts/setup
 make p2                                 # build controller and CLI, apply CRD, RBAC, policies, controller
 make test-approval                      # 58 checks
 make test-agent-guard                   # 33 checks; temporarily widens the agent's RBAC
-make test-budget                        # 33 checks; creates and removes a ChangeBudget
-make test-kill-switch                   # 46 checks; stops a running agent, resumes, leaves mode=run
+make test-budget                        # 34 checks; creates and removes a ChangeBudget
+make test-kill-switch                   # 42 checks; stops a running agent, resumes, leaves mode=run
 make durable                            # Temporal and the agent worker
 make test-durable                       # 40 checks; restarts both mid-approval
+make test-review                        # 38 checks; review packet, overrides, oversight metrics, rollback
+projects/02-approval-gate/bin/approvalctl stats
 ./scripts/kill-switch.sh status         # stop --reason TEXT | resume --reason TEXT
 ./scripts/new-approver.sh alice         # writes ~/.kube/safe-ops-approver-alice.kubeconfig
 export KUBECONFIG=~/.kube/safe-ops-approver-alice.kubeconfig

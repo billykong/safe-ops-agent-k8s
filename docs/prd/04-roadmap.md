@@ -40,10 +40,10 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 3. **Done.** Admission guard rejecting direct writes by the agent's identity, as a ValidatingAdmissionPolicy (`make test-agent-guard`); limit recorded as GAP-02.
 4. **Done.** Change budget (`make test-budget`) and kill switch with its runbook (`make test-kill-switch`, `docs/runbooks/kill-switch.md`).
 5. **Done.** Durable execution across long approvals with Temporal; pod-restart demo (`make durable test-durable`).
-6. **Next.** Deterministic approval packet and oversight metrics.
+6. **Done.** Computed review packet (server-side dry run, diff, blast radius, findings, rollback check) and oversight metrics (`make test-review`). **Phase 2's exit criteria are met.**
 
 ### P3: identity, tools and policy
-1. Per-agent workload identity (projected SA tokens, then SPIFFE/SPIRE if worthwhile).
+1. **Next.** Per-agent workload identity (projected SA tokens, then SPIFFE/SPIRE if worthwhile).
 2. LLM gateway holding the model key, with token budgets; agent loop switches from scripted to model-driven.
 3. MCP servers behind a gateway brokering secrets; pinned descriptors.
 4. Kyverno or OPA as the semantic action gate.

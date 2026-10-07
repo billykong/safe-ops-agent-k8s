@@ -162,6 +162,72 @@ type TargetState struct {
 	RestartedAt string `json:"restartedAt,omitempty"`
 }
 
+// Severity of a finding.
+// +kubebuilder:validation:Enum=Info;Warning;Critical
+type Severity string
+
+const (
+	SeverityInfo     Severity = "Info"
+	SeverityWarning  Severity = "Warning"
+	SeverityCritical Severity = "Critical"
+)
+
+// Finding is a deterministic rule's verdict on the plan (P2-40).
+type Finding struct {
+	Severity Severity `json:"severity"`
+	// code: a stable identifier, e.g. ScaleToZero, BelowDisruptionBudget.
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// FieldChange is one field the plan changes, from the server's own dry run.
+type FieldChange struct {
+	// path: dotted path, e.g. spec.replicas.
+	Path string `json:"path"`
+	// from and to: JSON values; empty when the field is absent.
+	// +optional
+	From string `json:"from,omitempty"`
+	// +optional
+	To string `json:"to,omitempty"`
+}
+
+// ComputedBlastRadius is what the change does to the target's pods,
+// computed from the live object, not taken from the proposer.
+type ComputedBlastRadius struct {
+	ReplicasBefore int32 `json:"replicasBefore"`
+	ReplicasAfter  int32 `json:"replicasAfter"`
+	ReadyBefore    int32 `json:"readyBefore"`
+	PodsAdded      int32 `json:"podsAdded"`
+	PodsRemoved    int32 `json:"podsRemoved"`
+	// podsReplaced: pods recreated by a rollout.
+	PodsReplaced int32 `json:"podsReplaced"`
+	// maxUnavailable: how many pods a rollout may take down at once,
+	// resolved against the replica count.
+	MaxUnavailable int32 `json:"maxUnavailable"`
+	// disruptionBudgets: PodDisruptionBudgets selecting the target's pods.
+	// +optional
+	DisruptionBudgets []string `json:"disruptionBudgets,omitempty"`
+	Summary           string   `json:"summary"`
+}
+
+// Review is the packet the approver reviews, computed by the controller
+// from the cluster, with no model involved (P2-40). It is covered by the
+// review hash, so an approval binds to it.
+type Review struct {
+	// diff: every field the plan changes, from a server-side dry run of
+	// the exact patch, so defaulting and admission are accounted for.
+	// +optional
+	Diff []FieldChange `json:"diff,omitempty"`
+	// dryRun: "accepted", or "refused: <the API server's reason>".
+	DryRun      string              `json:"dryRun"`
+	BlastRadius ComputedBlastRadius `json:"blastRadius"`
+	// +optional
+	Findings []Finding `json:"findings,omitempty"`
+	// rollbackCheck: whether the rollback plan, applied to the dry run's
+	// result, restores the reviewed pre-state exactly.
+	RollbackCheck string `json:"rollbackCheck"`
+}
+
 // ChangeRequestStatus is owned by the controller, except approval.
 type ChangeRequestStatus struct {
 	// +optional
@@ -175,6 +241,20 @@ type ChangeRequestStatus struct {
 	// approved the change.
 	// +optional
 	BudgetGrant *BudgetGrant `json:"budgetGrant,omitempty"`
+	// review: the computed review packet for the current plan.
+	// +optional
+	Review *Review `json:"review,omitempty"`
+	// proposedAt: when the request was first proposed (not reset by
+	// re-proposals). With decidedAt, the basis of the oversight metrics.
+	// +optional
+	ProposedAt *metav1.Time `json:"proposedAt,omitempty"`
+	// decidedAt: when the controller saw the request reach a final phase.
+	// +optional
+	DecidedAt *metav1.Time `json:"decidedAt,omitempty"`
+	// proposals: how many times the plan was computed; more than one means
+	// it was re-proposed after drift.
+	// +optional
+	Proposals int32 `json:"proposals,omitempty"`
 	// preState: the target as recorded when the request was proposed (or
 	// re-proposed after drift). Checked against live state before applying.
 	// +optional

@@ -11,6 +11,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -49,6 +50,8 @@ type ChangeRequestReconciler struct {
 // +kubebuilder:rbac:groups=approval.safe-ops.io,resources=changerequests/status,verbs=get;update;patch
 // Write access to targets is namespace-scoped, never cluster-wide (P2-03).
 // +kubebuilder:rbac:groups=apps,namespace=workloads,resources=deployments,verbs=get;patch
+// Read the disruption budgets that cover a target, for the review packet.
+// +kubebuilder:rbac:groups=policy,namespace=workloads,resources=poddisruptionbudgets,verbs=list
 // The change budget: read it, and record grants in its status (P2-20).
 // +kubebuilder:rbac:groups=approval.safe-ops.io,resources=changebudgets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=approval.safe-ops.io,resources=changebudgets/status,verbs=get;update;patch
@@ -95,7 +98,7 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		if err != nil {
 			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, fmt.Sprintf("reading target: %v", err))
 		}
-		if err := r.propose(&cr, dep); err != nil {
+		if err := r.propose(ctx, &cr, dep); err != nil {
 			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, err.Error())
 		}
 		st.Phase = approvalv1alpha1.PhasePending
@@ -118,7 +121,7 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 				return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, fmt.Sprintf("reading target: %v", err))
 			}
 			st.Approval, st.BudgetGrant = nil, nil
-			if err := r.propose(&cr, dep); err != nil {
+			if err := r.propose(ctx, &cr, dep); err != nil {
 				return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, err.Error())
 			}
 			st.Phase, st.Message = approvalv1alpha1.PhaseNeedsReapproval, "re-proposed with a review hash and expiry: approve again"
@@ -165,7 +168,7 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			// The budget paid for the old plan only: a re-proposed plan
 			// needs a human.
 			st.Approval, st.BudgetGrant = nil, nil
-			if err := r.propose(&cr, dep); err != nil {
+			if err := r.propose(ctx, &cr, dep); err != nil {
 				return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, err.Error())
 			}
 			st.Phase = approvalv1alpha1.PhaseNeedsReapproval
@@ -203,6 +206,46 @@ func (r *ChangeRequestReconciler) apply(ctx context.Context, cr, base *approvalv
 	logf.FromContext(ctx).Info("applied", "plan", cr.Status.Plan)
 	by := "approved by " + approverOf(cr)
 	return r.finish(ctx, cr, base, approvalv1alpha1.PhaseApplied, "applied ("+by+"); rollbackPlan undoes it")
+}
+
+// review builds the packet for the current plan: a server-side dry run of
+// the exact patch (admission included), the diff it implies, the computed
+// blast radius, the rule findings and the rollback check. A refusal by the
+// server is a finding; any other error is returned and the proposal retried.
+func (r *ChangeRequestReconciler) review(ctx context.Context, cr *approvalv1alpha1.ChangeRequest, dep *appsv1.Deployment) (*approvalv1alpha1.Review, error) {
+	live, err := runtime.DefaultUnstructuredConverter.ToUnstructured(dep)
+	if err != nil {
+		return nil, err
+	}
+	rv := &approvalv1alpha1.Review{DryRun: "accepted"}
+	refusal := ""
+	dry := dep.DeepCopy()
+	if err := r.Patch(ctx, dry, client.RawPatch(types.MergePatchType, []byte(cr.Status.Plan)), client.DryRunAll); err != nil {
+		switch apierrors.ReasonForError(err) {
+		case metav1.StatusReasonForbidden, metav1.StatusReasonInvalid, metav1.StatusReasonBadRequest, metav1.StatusReasonNotAcceptable:
+			refusal = err.Error()
+			rv.DryRun = "refused: " + refusal
+		default:
+			return nil, fmt.Errorf("dry run: %w", err)
+		}
+	}
+	var pdbs policyv1.PodDisruptionBudgetList
+	if err := r.Reader.List(ctx, &pdbs, client.InNamespace(dep.Namespace)); err != nil {
+		return nil, fmt.Errorf("listing disruption budgets: %w", err)
+	}
+	if refusal == "" {
+		after, err := runtime.DefaultUnstructuredConverter.ToUnstructured(dry)
+		if err != nil {
+			return nil, err
+		}
+		rv.Diff = Diff(live, after, DiffRoots...)
+		rv.RollbackCheck = RollbackCheck(live, after, cr.Status.RollbackPlan)
+	} else {
+		rv.RollbackCheck = "not checked: the dry run was refused"
+	}
+	rv.BlastRadius = BlastRadius(dep, cr.Spec.Action, pdbs.Items)
+	rv.Findings = Findings(dep, cr.Spec.Action, rv.BlastRadius, pdbs.Items, rv.Diff, refusal)
+	return rv, nil
 }
 
 func approverOf(cr *approvalv1alpha1.ChangeRequest) string {
@@ -250,6 +293,19 @@ func (r *ChangeRequestReconciler) spendBudget(ctx context.Context, cr *approvalv
 	if err := Eligible(b.Spec, cr.Spec.Action); err != nil {
 		return nil, "waiting for approval: not covered by the change budget: " + err.Error(), nil
 	}
+	// The budget pays only for changes the review rules find nothing to
+	// warn about (P2-44: risk tiers decided by deterministic policy).
+	if rv := cr.Status.Review; rv != nil {
+		if w := Worst(rv.Findings); w == approvalv1alpha1.SeverityWarning || w == approvalv1alpha1.SeverityCritical {
+			codes := []string{}
+			for _, f := range rv.Findings {
+				if f.Severity != approvalv1alpha1.SeverityInfo {
+					codes = append(codes, f.Code)
+				}
+			}
+			return nil, fmt.Sprintf("waiting for approval: not covered by the change budget: review findings %v", codes), nil
+		}
+	}
 	now, window := r.now(), BudgetWindow(b.Spec)
 	live := InWindow(b.Status.Grants, window, now)
 	grant := &approvalv1alpha1.BudgetGrant{Budget: b.Name, ReviewHash: cr.Status.ReviewHash, Time: metav1.NewTime(now)}
@@ -273,7 +329,7 @@ func (r *ChangeRequestReconciler) spendBudget(ctx context.Context, cr *approvalv
 
 // propose records the target's pre-state, the exact patch and rollback
 // patch computed from it, the hash an approval must carry, and the expiry.
-func (r *ChangeRequestReconciler) propose(cr *approvalv1alpha1.ChangeRequest, dep *appsv1.Deployment) error {
+func (r *ChangeRequestReconciler) propose(ctx context.Context, cr *approvalv1alpha1.ChangeRequest, dep *appsv1.Deployment) error {
 	pre := Observe(dep)
 	now := r.now()
 	plan, rollback, err := Plan(cr.Spec.Action, pre, now)
@@ -282,6 +338,14 @@ func (r *ChangeRequestReconciler) propose(cr *approvalv1alpha1.ChangeRequest, de
 	}
 	st := &cr.Status
 	st.PreState, st.Plan, st.RollbackPlan = &pre, plan, rollback
+	if st.Review, err = r.review(ctx, cr, dep); err != nil {
+		return err
+	}
+	st.Proposals++
+	if st.ProposedAt == nil {
+		t := metav1.NewTime(now)
+		st.ProposedAt = &t
+	}
 	if st.ReviewHash, err = ReviewHash(cr); err != nil {
 		return err
 	}
@@ -296,7 +360,8 @@ func (r *ChangeRequestReconciler) propose(cr *approvalv1alpha1.ChangeRequest, de
 
 // ReviewHash covers everything an approver reviews: which object (UID, so
 // a deleted and re-created namesake doesn't inherit approvals), the
-// proposal, and the controller's pre-state, plan and rollback.
+// proposal, and the controller's pre-state, plan, rollback and review
+// packet.
 func ReviewHash(cr *approvalv1alpha1.ChangeRequest) (string, error) {
 	b, err := json.Marshal(struct {
 		UID          types.UID                          `json:"uid"`
@@ -304,7 +369,8 @@ func ReviewHash(cr *approvalv1alpha1.ChangeRequest) (string, error) {
 		PreState     *approvalv1alpha1.TargetState      `json:"preState"`
 		Plan         string                             `json:"plan"`
 		RollbackPlan string                             `json:"rollbackPlan"`
-	}{cr.UID, cr.Spec, cr.Status.PreState, cr.Status.Plan, cr.Status.RollbackPlan})
+		Review       *approvalv1alpha1.Review           `json:"review"`
+	}{cr.UID, cr.Spec, cr.Status.PreState, cr.Status.Plan, cr.Status.RollbackPlan, cr.Status.Review})
 	if err != nil {
 		return "", err
 	}
@@ -312,8 +378,13 @@ func ReviewHash(cr *approvalv1alpha1.ChangeRequest) (string, error) {
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
+// finish moves a request to a final phase and records when.
 func (r *ChangeRequestReconciler) finish(ctx context.Context, cr, base *approvalv1alpha1.ChangeRequest, phase approvalv1alpha1.Phase, msg string) (ctrl.Result, error) {
 	cr.Status.Phase, cr.Status.Message = phase, msg
+	if cr.Status.DecidedAt == nil {
+		t := metav1.NewTime(r.now())
+		cr.Status.DecidedAt = &t
+	}
 	logf.FromContext(ctx).Info("finished", "phase", phase, "message", msg)
 	return ctrl.Result{}, r.save(ctx, cr, base)
 }

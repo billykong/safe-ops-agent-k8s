@@ -88,10 +88,10 @@ The sandbox never protects the cluster from a bad-but-approved change. That's th
 4. The agent deletes the claim, and the sandbox is destroyed.
 5. A `shutdownTime` on the claim is the backstop if the agent dies.
 
-**Change the cluster (P2, planned).**
+**Change the cluster (P2, built).**
 1. The agent investigates (in sandboxes), then creates a `ChangeRequest` with intent, typed action or diff, blast radius, declared scope and rollback.
 2. Policy validates it at admission.
-3. A human reviews a deterministic packet (diff, dry-run, blast radius, policy findings) and approves through the status subresource. The approval is bound to the spec hash and expires.
+3. A human reviews a deterministic packet computed by the controller (server-side dry run and the diff it implies, blast radius, rule findings, rollback check), with the agent's own account shown last as unverified, and approves through the status subresource. The approval is bound to a hash of the spec and the packet, and expires.
 4. The controller re-checks live state against the recorded pre-state, applies with its own scoped credentials, and records pre-state, command and rollback.
 5. The agent's durable workflow (Temporal), which has been waiting on the request, resumes when it completes, even if the agent and Temporal restarted in between.
 
