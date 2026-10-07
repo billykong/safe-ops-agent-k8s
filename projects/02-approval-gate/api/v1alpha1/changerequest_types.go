@@ -85,7 +85,7 @@ type ChangeRequestSpec struct {
 }
 
 // Phase of a ChangeRequest.
-// +kubebuilder:validation:Enum=Pending;NeedsReapproval;Applying;Applied;Rejected;Failed;Expired
+// +kubebuilder:validation:Enum=Pending;NeedsReapproval;Applying;Applied;Rejected;Failed;Expired;Cancelled
 type Phase string
 
 const (
@@ -104,6 +104,8 @@ const (
 	PhaseFailed Phase = "Failed"
 	// PhaseExpired: no valid approval arrived before expiresAt.
 	PhaseExpired Phase = "Expired"
+	// PhaseCancelled: stopped by the kill switch before it was applied.
+	PhaseCancelled Phase = "Cancelled"
 )
 
 // Decision by an approver.
@@ -138,6 +140,18 @@ type Approval struct {
 	Comment string `json:"comment,omitempty"`
 }
 
+// BudgetGrant records that a change was approved by the change budget
+// rather than by a human (P2-20). Written by the controller only.
+type BudgetGrant struct {
+	// budget: the ChangeBudget that paid for this change.
+	Budget string `json:"budget"`
+	// reviewHash: the packet the grant is for. Re-planning after drift
+	// changes the hash, and the grant no longer applies.
+	// +kubebuilder:validation:Pattern=`^sha256:[0-9a-f]{64}$`
+	ReviewHash string      `json:"reviewHash"`
+	Time       metav1.Time `json:"time"`
+}
+
 // TargetState is what the controller saw of the target.
 type TargetState struct {
 	// generation of the target, which changes with any spec change.
@@ -157,6 +171,10 @@ type ChangeRequestStatus struct {
 	// approval: the human decision, set through the status subresource.
 	// +optional
 	Approval *Approval `json:"approval,omitempty"`
+	// budgetGrant: set instead of a human approval when the change budget
+	// approved the change.
+	// +optional
+	BudgetGrant *BudgetGrant `json:"budgetGrant,omitempty"`
 	// preState: the target as recorded when the request was proposed (or
 	// re-proposed after drift). Checked against live state before applying.
 	// +optional
@@ -192,6 +210,7 @@ type ChangeRequestStatus struct {
 // +kubebuilder:printcolumn:name="Target",type=string,JSONPath=`.spec.action.target.name`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Approver",type=string,JSONPath=`.status.approval.approver`
+// +kubebuilder:printcolumn:name="Budget",type=string,JSONPath=`.status.budgetGrant.budget`
 // +kubebuilder:printcolumn:name="Expires",type=date,JSONPath=`.status.expiresAt`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

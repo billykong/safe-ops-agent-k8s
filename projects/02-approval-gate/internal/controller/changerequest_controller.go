@@ -10,13 +10,18 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	approvalv1alpha1 "github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/api/v1alpha1"
 )
@@ -44,6 +49,11 @@ type ChangeRequestReconciler struct {
 // +kubebuilder:rbac:groups=approval.safe-ops.io,resources=changerequests/status,verbs=get;update;patch
 // Write access to targets is namespace-scoped, never cluster-wide (P2-03).
 // +kubebuilder:rbac:groups=apps,namespace=workloads,resources=deployments,verbs=get;patch
+// The change budget: read it, and record grants in its status (P2-20).
+// +kubebuilder:rbac:groups=approval.safe-ops.io,resources=changebudgets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=approval.safe-ops.io,resources=changebudgets/status,verbs=get;update;patch
+// The kill switch flag, read-only, in the controller's own namespace (P2-21).
+// +kubebuilder:rbac:groups="",namespace=approval-system,resources=configmaps,verbs=get;list;watch
 
 func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -55,9 +65,25 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	st := &cr.Status
 
 	switch st.Phase {
-	case approvalv1alpha1.PhaseApplied, approvalv1alpha1.PhaseRejected, approvalv1alpha1.PhaseFailed, approvalv1alpha1.PhaseExpired:
+	case approvalv1alpha1.PhaseApplied, approvalv1alpha1.PhaseRejected, approvalv1alpha1.PhaseFailed, approvalv1alpha1.PhaseExpired,
+		approvalv1alpha1.PhaseCancelled:
 		return ctrl.Result{}, nil
+	}
 
+	// Kill switch (P2-21), fail closed: unless it says run, nothing that
+	// hasn't started applying will, whoever approved it. An apply already
+	// under way is a single idempotent patch and is allowed to finish.
+	if st.Phase != approvalv1alpha1.PhaseApplying {
+		running, why, err := r.agentRunning(ctx)
+		if err != nil {
+			return ctrl.Result{}, err // can't tell: apply nothing, retry
+		}
+		if !running {
+			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseCancelled, why)
+		}
+	}
+
+	switch st.Phase {
 	case "":
 		// New proposal. An approval written before the controller has
 		// recorded the pre-state and plan didn't review them: drop it.
@@ -73,8 +99,14 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, err.Error())
 		}
 		st.Phase = approvalv1alpha1.PhasePending
-		st.Message = "waiting for approval"
-		log.Info("proposed", "plan", st.Plan)
+		// The budget is consulted once, here. A request it doesn't pay
+		// for waits for a human, even if budget frees up later.
+		grant, why, err := r.spendBudget(ctx, &cr)
+		if err != nil {
+			return ctrl.Result{}, err // usually a conflict on the budget: retried
+		}
+		st.BudgetGrant, st.Message = grant, why
+		log.Info("proposed", "plan", st.Plan, "budget", why)
 		return ctrl.Result{}, r.save(ctx, &cr, base)
 
 	case approvalv1alpha1.PhasePending, approvalv1alpha1.PhaseNeedsReapproval:
@@ -85,7 +117,7 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			if err != nil {
 				return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, fmt.Sprintf("reading target: %v", err))
 			}
-			st.Approval = nil
+			st.Approval, st.BudgetGrant = nil, nil
 			if err := r.propose(&cr, dep); err != nil {
 				return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, err.Error())
 			}
@@ -94,25 +126,28 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		// Expiry is judged by the controller's clock, never by a time a
 		// client wrote (P2-12).
+		budgeted := st.BudgetGrant != nil && st.BudgetGrant.ReviewHash == st.ReviewHash
 		if remaining := st.ExpiresAt.Sub(r.now()); remaining <= 0 {
 			st.Approval = nil
 			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseExpired,
 				fmt.Sprintf("no valid approval before %s", st.ExpiresAt.UTC().Format(time.RFC3339)))
-		} else if st.Approval == nil {
+		} else if st.Approval == nil && !budgeted {
 			return ctrl.Result{RequeueAfter: remaining}, nil // expire on time even if nobody answers
 		}
-		if st.Approval.Decision == approvalv1alpha1.DecisionRejected {
-			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseRejected, "rejected by "+st.Approval.Approver)
-		}
-		// The approval must be for exactly the packet the controller
-		// currently holds. One made for an earlier plan (before drift) or
-		// any other hash is discarded, not applied (P2-12).
-		if st.Approval.ReviewHash != st.ReviewHash {
-			st.Message = fmt.Sprintf("discarded an approval by %s for review hash %s; the current plan's hash is %s: review again",
-				st.Approval.Approver, st.Approval.ReviewHash, st.ReviewHash)
-			st.Approval = nil
-			log.Info("hash mismatch", "message", st.Message)
-			return ctrl.Result{}, r.save(ctx, &cr, base)
+		if st.Approval != nil {
+			if st.Approval.Decision == approvalv1alpha1.DecisionRejected {
+				return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseRejected, "rejected by "+st.Approval.Approver)
+			}
+			// The approval must be for exactly the packet the controller
+			// currently holds. One made for an earlier plan (before drift)
+			// or any other hash is discarded, not applied (P2-12).
+			if st.Approval.ReviewHash != st.ReviewHash {
+				st.Message = fmt.Sprintf("discarded an approval by %s for review hash %s; the current plan's hash is %s: review again",
+					st.Approval.Approver, st.Approval.ReviewHash, st.ReviewHash)
+				st.Approval = nil
+				log.Info("hash mismatch", "message", st.Message)
+				return ctrl.Result{}, r.save(ctx, &cr, base)
+			}
 		}
 		if err := CheckScope(cr.Spec); err != nil { // the spec is immutable, but check again before writing
 			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseRejected, err.Error())
@@ -127,7 +162,9 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		// and require a fresh approval (P2-04).
 		if live := Observe(dep); Drifted(*st.PreState, live) {
 			before := *st.PreState
-			st.Approval = nil
+			// The budget paid for the old plan only: a re-proposed plan
+			// needs a human.
+			st.Approval, st.BudgetGrant = nil, nil
 			if err := r.propose(&cr, dep); err != nil {
 				return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, err.Error())
 			}
@@ -164,7 +201,74 @@ func (r *ChangeRequestReconciler) apply(ctx context.Context, cr, base *approvalv
 	now := metav1.NewTime(r.now())
 	cr.Status.AppliedAt = &now
 	logf.FromContext(ctx).Info("applied", "plan", cr.Status.Plan)
-	return r.finish(ctx, cr, base, approvalv1alpha1.PhaseApplied, "applied; rollbackPlan undoes it")
+	by := "approved by " + approverOf(cr)
+	return r.finish(ctx, cr, base, approvalv1alpha1.PhaseApplied, "applied ("+by+"); rollbackPlan undoes it")
+}
+
+func approverOf(cr *approvalv1alpha1.ChangeRequest) string {
+	if a := cr.Status.Approval; a != nil {
+		return a.Approver
+	}
+	if g := cr.Status.BudgetGrant; g != nil {
+		return "change budget " + g.Budget
+	}
+	return "nobody"
+}
+
+// agentRunning reads the kill switch. Not found means stopped; any other
+// error is returned, so nothing proceeds until the flag can be read.
+func (r *ChangeRequestReconciler) agentRunning(ctx context.Context) (bool, string, error) {
+	var cm corev1.ConfigMap
+	err := r.Get(ctx, types.NamespacedName{Namespace: KillSwitchNamespace, Name: KillSwitchName}, &cm)
+	if apierrors.IsNotFound(err) {
+		running, why := Running(nil)
+		return running, why, nil
+	}
+	if err != nil {
+		return false, "", err
+	}
+	running, why := Running(&cm)
+	return running, why, nil
+}
+
+// spendBudget pays for a just-proposed change from the namespace's change
+// budget if it's eligible and budget is left (P2-20). The grant is recorded
+// in the budget's status, conditional on its resourceVersion, before the
+// request can be applied, so two requests can't spend the same slot. It is
+// keyed by the request's UID: after a crash between the two writes, the
+// retry finds its grant instead of spending another. Returns the grant (nil
+// if the change must wait for a human) and a message explaining why.
+func (r *ChangeRequestReconciler) spendBudget(ctx context.Context, cr *approvalv1alpha1.ChangeRequest) (*approvalv1alpha1.BudgetGrant, string, error) {
+	var b approvalv1alpha1.ChangeBudget
+	err := r.Get(ctx, types.NamespacedName{Namespace: cr.Namespace, Name: approvalv1alpha1.DefaultBudgetName}, &b)
+	if apierrors.IsNotFound(err) {
+		return nil, "waiting for approval (no change budget)", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	if err := Eligible(b.Spec, cr.Spec.Action); err != nil {
+		return nil, "waiting for approval: not covered by the change budget: " + err.Error(), nil
+	}
+	now, window := r.now(), BudgetWindow(b.Spec)
+	live := InWindow(b.Status.Grants, window, now)
+	grant := &approvalv1alpha1.BudgetGrant{Budget: b.Name, ReviewHash: cr.Status.ReviewHash, Time: metav1.NewTime(now)}
+	left := func(used int) string {
+		return fmt.Sprintf("%d of %d left in the last %s", int(b.Spec.MaxChanges)-used, b.Spec.MaxChanges, window)
+	}
+	if slices.ContainsFunc(live, func(g approvalv1alpha1.Grant) bool { return g.UID == cr.UID }) {
+		return grant, "approved by change budget " + b.Name + " (" + left(len(live)) + ")", nil
+	}
+	if len(live) >= int(b.Spec.MaxChanges) {
+		return nil, fmt.Sprintf("waiting for approval: change budget %s is spent (%d of %d autonomous changes used in the last %s)",
+			b.Name, len(live), b.Spec.MaxChanges, window), nil
+	}
+	base := b.DeepCopy()
+	b.Status.Grants = append(live, approvalv1alpha1.Grant{ChangeRequest: cr.Name, UID: cr.UID, Time: metav1.NewTime(now)})
+	if err := r.Status().Patch(ctx, &b, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
+		return nil, "", err
+	}
+	return grant, "approved by change budget " + b.Name + " (" + left(len(b.Status.Grants)) + ")", nil
 }
 
 // propose records the target's pre-state, the exact patch and rollback
@@ -315,6 +419,30 @@ func Plan(a approvalv1alpha1.Action, pre approvalv1alpha1.TargetState, now time.
 func (r *ChangeRequestReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&approvalv1alpha1.ChangeRequest{}).
+		// When the kill switch changes, revisit every open request. The
+		// manager caches only that one ConfigMap (cmd/main.go).
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.openRequests),
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(o client.Object) bool {
+				return o.GetNamespace() == KillSwitchNamespace && o.GetName() == KillSwitchName
+			}))).
 		Named("changerequest").
 		Complete(r)
+}
+
+func (r *ChangeRequestReconciler) openRequests(ctx context.Context, _ client.Object) []reconcile.Request {
+	var l approvalv1alpha1.ChangeRequestList
+	if err := r.List(ctx, &l); err != nil {
+		logf.FromContext(ctx).Error(err, "listing ChangeRequests for the kill switch")
+		return nil
+	}
+	var reqs []reconcile.Request
+	for _, cr := range l.Items {
+		switch cr.Status.Phase {
+		case approvalv1alpha1.PhaseApplied, approvalv1alpha1.PhaseRejected, approvalv1alpha1.PhaseFailed,
+			approvalv1alpha1.PhaseExpired, approvalv1alpha1.PhaseCancelled:
+			continue
+		}
+		reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&cr)})
+	}
+	return reqs
 }

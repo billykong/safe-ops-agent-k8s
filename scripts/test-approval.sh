@@ -143,7 +143,9 @@ wait_phase who-$T Pending >/dev/null
 H=$(st who-$T '{.status.reviewHash}')
 out=$(raw_decide who-$T Approved "$H" kubernetes-admin || true)
 check "cluster admin outside safe-ops:approvers can't approve" 'needs an authenticated human in group safe-ops:approvers' "$out"
-out=$(raw_decide who-$T Approved "$H" robot --as=system:serviceaccount:agent:agent --as-group=safe-ops:approvers --as-group=system:authenticated || true)
+# Not the agent's SA: agent-write-guard would refuse that first, and this
+# checks the approval policy itself.
+out=$(raw_decide who-$T Approved "$H" robot --as=system:serviceaccount:approvals:default --as-group=safe-ops:approvers --as-group=system:authenticated || true)
 check "a service account in the approvers group still can't approve" 'not a service account' "$out"
 out=$(raw_decide who-$T Approved "$H" controller --as=$CTRL || true)
 check "the controller can't approve" 'needs an authenticated human' "$out"

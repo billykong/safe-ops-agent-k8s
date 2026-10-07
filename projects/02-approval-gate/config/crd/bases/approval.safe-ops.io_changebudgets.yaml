@@ -1,0 +1,156 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: changebudgets.approval.safe-ops.io
+spec:
+  group: approval.safe-ops.io
+  names:
+    kind: ChangeBudget
+    listKind: ChangeBudgetList
+    plural: changebudgets
+    singular: changebudget
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.maxChanges
+      name: Max
+      type: integer
+    - jsonPath: .spec.windowSeconds
+      name: Window
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ChangeBudget lets the controller apply a bounded number of low-risk
+          changes without a human approval.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              ChangeBudgetSpec bounds the changes the controller may apply without a
+              human (P2-20). Eligibility is decided by plain code over these fields,
+              never by a model. Written by operators; the agent can't touch it.
+            properties:
+              actions:
+                description: 'actions: the action types that may be applied autonomously.'
+                items:
+                  description: |-
+                    ActionType is a typed action the controller knows how to apply. Typed
+                    actions are the default path (P2-06): the agent picks one and its
+                    parameters, and the controller, not the agent, decides the exact patch.
+                  enum:
+                  - ScaleDeployment
+                  - RestartDeployment
+                  type: string
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: set
+              maxChanges:
+                description: |-
+                  maxChanges: autonomous changes allowed per window. Once spent, every
+                  change waits for a human until older grants age out. 0 always asks.
+                format: int32
+                maximum: 100
+                minimum: 0
+                type: integer
+              maxReplicas:
+                default: 3
+                format: int32
+                maximum: 50
+                minimum: 0
+                type: integer
+              minReplicas:
+                default: 1
+                description: |-
+                  minReplicas and maxReplicas bound an autonomous ScaleDeployment. Scaling
+                  outside them (to zero, say) needs a human.
+                format: int32
+                maximum: 50
+                minimum: 0
+                type: integer
+              namespaces:
+                description: 'namespaces: target namespaces where autonomous changes
+                  are allowed.'
+                items:
+                  type: string
+                maxItems: 10
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: set
+              windowSeconds:
+                default: 3600
+                description: 'windowSeconds: the rolling window maxChanges applies
+                  to.'
+                format: int32
+                maximum: 604800
+                minimum: 10
+                type: integer
+            required:
+            - actions
+            - maxChanges
+            - namespaces
+            type: object
+            x-kubernetes-validations:
+            - message: minReplicas must not exceed maxReplicas
+              rule: self.minReplicas <= self.maxReplicas
+          status:
+            description: ChangeBudgetStatus is written by the controller only.
+            properties:
+              grants:
+                description: |-
+                  grants: autonomous changes within the window, oldest first. The
+                  controller records a grant here, with resourceVersion as a
+                  precondition, before it applies the change, so concurrent requests
+                  can't overspend.
+                items:
+                  description: Grant is one autonomous change paid for by the budget.
+                  properties:
+                    changeRequest:
+                      type: string
+                    time:
+                      format: date-time
+                      type: string
+                    uid:
+                      description: |-
+                        UID is a type that holds unique ID values, including UUIDs.  Because we
+                        don't ONLY use UUIDs, this is an alias to string.  Being a type captures
+                        intent and helps make sure that UIDs and names do not get conflated.
+                      type: string
+                  required:
+                  - changeRequest
+                  - time
+                  - uid
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
