@@ -81,6 +81,8 @@ mode() { kubectl get configmap -n approval-system agent-kill-switch -o jsonpath=
 cleanup() {
   [ "$(mode)" = run ] || ./scripts/kill-switch.sh resume --reason "test-kill-switch cleanup" >/dev/null 2>&1 || true
   kubectl delete job -n agent $JOB --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  # The runbook's deliberate restart, for the Temporal worker (if installed).
+  kubectl scale deploy -n agent agent-worker --replicas=1 >/dev/null 2>&1 || true
   kubectl delete changebudget -n $NS default --ignore-not-found >/dev/null 2>&1 || true
   for n in $(kubectl get changerequest -n $NS -o name 2>/dev/null | grep -- "-$T\$"); do kubectl delete -n $NS "$n" --wait=false >/dev/null 2>&1; done
   kubectl scale deploy -n workloads web --replicas=1 >/dev/null 2>&1 || true

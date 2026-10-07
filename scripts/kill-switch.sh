@@ -11,18 +11,33 @@
 #      in the agent namespace, and new tokens for it (manifests/90-kill-
 #      switch.yaml); the approval controller cancels every ChangeRequest
 #      that hasn't started applying, and applies nothing more.
-#   2. scale to zero: suspend Jobs and CronJobs, scale Deployments and
+#   2. cancel in-flight workflows: terminate every running workflow in
+#      Temporal (P2 milestone 5), if it's installed. Terminated, not
+#      cancelled: cancellation needs a worker to run the workflow's
+#      cleanup, and the workers are about to go. A resumed agent starts no
+#      old work.
+#   3. scale to zero: suspend Jobs and CronJobs, scale Deployments and
 #      StatefulSets to 0, delete the remaining pods in the agent namespace.
-#   3. revoke credentials: delete and recreate ServiceAccount agent/agent.
+#   4. revoke credentials: delete and recreate ServiceAccount agent/agent.
 #      Every token issued for it, including copies taken out of the
 #      cluster, names the old UID and is refused from then on, for reads
 #      too (admission never sees reads).
-#   4. release the agent's sandboxes: delete its SandboxClaims (agent-*).
+#   5. release the agent's sandboxes: delete its SandboxClaims (agent-*).
 # Needs cluster-admin. Safe to re-run. resume sets mode=run and nothing
 # else: the agent's workloads stay suspended until someone restarts them.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 CM_NS=approval-system CM=agent-kill-switch AGENT_NS=agent SA=agent
+TEMPORAL_NS=temporal
+
+# The Temporal CLI inside the server's pod (the frontend admits no one
+# else, and the pod's own address needs no network policy).
+temporal() { kubectl exec -n $TEMPORAL_NS deploy/temporal -- temporal "$@"; }
+has_temporal() { kubectl get deploy -n $TEMPORAL_NS temporal >/dev/null 2>&1; }
+running_workflows() {
+  temporal workflow list --query "ExecutionStatus='Running'" -o json 2>/dev/null \
+    | python3 -c 'import json,sys; [print(w["execution"]["workflowId"]) for w in json.load(sys.stdin) or []]'
+}
 
 usage() { echo "usage: $0 status | stop --reason TEXT | resume --reason TEXT" >&2; exit 2; }
 cmd=${1:-}; shift || true
@@ -62,6 +77,7 @@ status() {
   echo "agent SA uid:  $(kubectl get sa -n $AGENT_NS $SA -o jsonpath='{.metadata.uid}' 2>/dev/null || echo missing)"
   echo "agent claims:  $(kubectl get sandboxclaims -n sandboxes -o name 2>/dev/null | grep -c '/agent-' || true)"
   echo "open requests: $(open_crs | wc -l)"
+  if has_temporal; then echo "workflows:     $(running_workflows | wc -l) running"; fi
 }
 
 case $cmd in
@@ -71,18 +87,32 @@ stop)
   t0=$(date +%s.%N)
   flag stop "$reason"
   echo "1. flag set to stop: admission now refuses the agent's claims and proposals, new agent pods and tokens"
+  # Never abort here: a workflow can finish between the list and the
+  # terminate, and Temporal can be down; the steps after this one must run
+  # regardless. Report what didn't terminate instead.
+  if has_temporal; then
+    wfs=$(running_workflows || true) n=0 failed=""
+    for w in $wfs; do
+      if temporal workflow terminate --workflow-id "$w" --reason "kill switch: $reason" >/dev/null 2>&1; then n=$((n+1)); else failed="$failed $w"; fi
+    done
+    echo "2. in-flight workflows terminated: $n${failed:+ (not terminated, finished or unreachable:$failed)}"
+    left=$(running_workflows || echo "?")
+    [ -z "$left" ] || echo "   WARNING: still running: $left"
+  else
+    echo "2. in-flight workflows: none (Temporal not installed)"
+  fi
   for j in $(kubectl get jobs -n $AGENT_NS -o name); do kubectl patch -n $AGENT_NS "$j" --type=merge -p '{"spec":{"suspend":true}}' >/dev/null; done
   for j in $(kubectl get cronjobs -n $AGENT_NS -o name); do kubectl patch -n $AGENT_NS "$j" --type=merge -p '{"spec":{"suspend":true}}' >/dev/null; done
   for w in $(kubectl get deployments,statefulsets -n $AGENT_NS -o name); do kubectl scale -n $AGENT_NS "$w" --replicas=0 >/dev/null; done
   kubectl delete pods -n $AGENT_NS --all --wait=false >/dev/null
-  echo "2. scaled to zero: jobs suspended, pods deleting"
+  echo "3. scaled to zero: jobs suspended, deployments at 0, pods deleting"
   old=$(kubectl get sa -n $AGENT_NS $SA -o jsonpath='{.metadata.uid}' 2>/dev/null || echo none)
   kubectl delete sa -n $AGENT_NS $SA --ignore-not-found >/dev/null
   kubectl create sa -n $AGENT_NS $SA >/dev/null
-  echo "3. credentials revoked: ServiceAccount $AGENT_NS/$SA recreated (uid $old -> $(kubectl get sa -n $AGENT_NS $SA -o jsonpath='{.metadata.uid}'))"
+  echo "4. credentials revoked: ServiceAccount $AGENT_NS/$SA recreated (uid $old -> $(kubectl get sa -n $AGENT_NS $SA -o jsonpath='{.metadata.uid}'))"
   claims=$(kubectl get sandboxclaims -n sandboxes -o name 2>/dev/null | grep '/agent-' || true)
   [ -z "$claims" ] || kubectl delete -n sandboxes $claims --wait=false >/dev/null
-  echo "4. sandboxes released: $(wc -w <<<"$claims") claim(s)"
+  echo "5. sandboxes released: $(wc -w <<<"$claims") claim(s)"
   # The controller cancels open requests on its own; wait for it so the
   # report below is the settled state.
   for _ in $(seq 1 30); do [ -z "$(open_crs | grep -v ' Applying$' || true)" ] && break; sleep 1; done

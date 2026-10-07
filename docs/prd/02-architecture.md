@@ -60,9 +60,9 @@ flowchart LR
 | **LLM gateway** | P3 | Trusted | Model API key; token budgets and rate limits | Planned |
 | **MCP / tool gateway** | P3 | Trusted | Tool secrets; per-agent authorisation | Planned |
 | **Policy engine** (Kyverno/OPA; ValidatingAdmissionPolicy) | P1-P3 | Trusted | Rules: allow, deny, escalate | VAP for sandbox claims built (P1); rest planned |
-| **ChangeRequest CRD + approval controller / executor** | P2 | Trusted, crown jewel | Namespace-scoped write credentials | Built (M1): CRD, controller, agent proposer role |
-| **Kill switch** | P2 | Trusted | Flag checked by a fail-closed webhook, plus credential revocation | Planned |
-| **Durable workflow** (Temporal or LangGraph `interrupt`) | P2 | Trusted | Agent state across long approvals | Planned |
+| **ChangeRequest CRD + approval controller / executor** | P2 | Trusted, crown jewel | Namespace-scoped write credentials | Built (M1-M4): CRD, controller, agent proposer role, approval policies, write guard, change budget |
+| **Kill switch** | P2 | Trusted | Flag checked by a fail-closed admission policy, plus credential revocation, workflow termination, scale to zero | Built (M4-M5) |
+| **Durable workflow** (Temporal) | P2 | Trusted; no auth of its own, fenced by network policy (GAP-03) | Agent state across long approvals | Built (M5): Temporal dev server with SQLite on a volume; the agent is a worker |
 | **Observability** (OTel GenAI traces, Prometheus/Grafana, API audit log) | P4 | Trusted; agent can't write to the store | Traces, metrics, audit | Planned |
 | **Eval runner** (Jobs or Argo Workflows; blind LLM judge) | P4 | Trusted, separate identity | Recorded scenarios | Planned |
 | **Local inference** (Ollama/llama.cpp or vLLM) | P5 | Infrastructure; no auth of its own | Model weights | Planned |
@@ -93,7 +93,7 @@ The sandbox never protects the cluster from a bad-but-approved change. That's th
 2. Policy validates it at admission.
 3. A human reviews a deterministic packet (diff, dry-run, blast radius, policy findings) and approves through the status subresource. The approval is bound to the spec hash and expires.
 4. The controller re-checks live state against the recorded pre-state, applies with its own scoped credentials, and records pre-state, command and rollback.
-5. The agent's durable workflow resumes when the request completes.
+5. The agent's durable workflow (Temporal), which has been waiting on the request, resumes when it completes, even if the agent and Temporal restarted in between.
 
 **Call a tool or the model (P3, planned).** The agent authenticates to the gateway with its workload identity. The gateway applies policy and budgets, injects the secret, and calls the tool or model. The agent never sees the secret.
 

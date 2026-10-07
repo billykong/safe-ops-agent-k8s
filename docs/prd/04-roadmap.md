@@ -39,8 +39,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 2. **Done.** Approval CLI (`approvalctl`) with authenticated approver identity (admission policies, client-certificate approvers); hash binding and expiry (`make test-approval`).
 3. **Done.** Admission guard rejecting direct writes by the agent's identity, as a ValidatingAdmissionPolicy (`make test-agent-guard`); limit recorded as GAP-02.
 4. **Done.** Change budget (`make test-budget`) and kill switch with its runbook (`make test-kill-switch`, `docs/runbooks/kill-switch.md`).
-5. **Next.** Durable execution across long approvals; pod-restart demo.
-6. Deterministic approval packet and oversight metrics.
+5. **Done.** Durable execution across long approvals with Temporal; pod-restart demo (`make durable test-durable`).
+6. **Next.** Deterministic approval packet and oversight metrics.
 
 ### P3: identity, tools and policy
 1. Per-agent workload identity (projected SA tokens, then SPIFFE/SPIRE if worthwhile).
@@ -84,7 +84,7 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 | --- | --- |
 | ~~Does Cilium's DNS proxy (`toFQDNs`) work with the eBPF-only datapath on the stock WSL2 kernel?~~ Yes, with transparent mode off (and Envoy not using the original source address). | Resolved (P1 M6) |
 | Build a custom WSL2 kernel with `xt_socket`/TPROXY/`NFT_QUEUE`, or move networking-sensitive work to bare metal? | Not blocking: each missing-module gap so far has a workaround (P1 README findings 4, 6, 19). Revisit on bare metal (P1 M7) |
-| Temporal vs LangGraph `interrupt` for durable execution | P2 M5 |
+| ~~Temporal vs LangGraph `interrupt` for durable execution~~ Temporal: replay-based durability with the guarantees the approval wait needs, and independent of the agent framework chosen in P3. | Resolved (P2 M5) |
 | ~~Approval channel: CLI only, or a Slack-style webhook?~~ CLI (`approvalctl`) with certificate-authenticated approvers; a chat channel only if it can carry the same identity. | Resolved (P2 M2) |
 | Kyverno vs OPA Gatekeeper vs plain ValidatingAdmissionPolicy for the action gate | P3 M4 |
 | SPIFFE/SPIRE vs projected SA tokens for workload identity | P3 M1 |

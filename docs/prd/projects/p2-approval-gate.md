@@ -2,7 +2,7 @@
 
 **Goal:** the agent never changes the cluster directly. It proposes; a human approves; a small trusted controller applies. Nothing the agent can do approves, alters or bypasses that flow. Covers goal G2.
 
-Status: **milestones 1-4 done** (CRD, controller, agent fence; authenticated approver, hash binding, expiry, CLI; admission guard on the agent's writes; change budget and kill switch). Implementation: [projects/02-approval-gate/](../../../projects/02-approval-gate/README.md). Depends on P1.
+Status: **milestones 1-5 done** (CRD, controller, agent fence; authenticated approver, hash binding, expiry, CLI; admission guard on the agent's writes; change budget and kill switch; durable execution with Temporal). Implementation: [projects/02-approval-gate/](../../../projects/02-approval-gate/README.md). Depends on P1.
 
 ## User stories
 
@@ -40,15 +40,15 @@ Status: **milestones 1-4 done** (CRD, controller, agent fence; authenticated app
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
 | P2-20 | Change budget: N autonomous changes, then the agent must ask. | Must | **Done**: `make test-budget` (a `ChangeBudget` of N eligible changes per rolling window, eligibility decided by code: action types, namespaces, replica range; grants recorded with an optimistic lock before applying; past the budget, or ineligible, a change waits for a human; agent and approvers can't change it, nobody but the controller can record a grant) |
-| P2-21 | Kill switch: a flag checked by a fail-closed admission webhook, plus revoking the agent's credentials, cancelling in-flight workflows and scaling the agent to zero. | Must | **Done** with a ValidatingAdmissionPolicy instead of a webhook: `make test-kill-switch` (one command; the flag stops the agent's claims and proposals, pods and tokens in its namespace; the ServiceAccount is recreated, so a stolen token fails even for reads; the agent's Job is suspended and can't come back; its sandbox is released; open proposals are cancelled by the controller; missing or garbled flag means stopped) |
+| P2-21 | Kill switch: a flag checked by a fail-closed admission webhook, plus revoking the agent's credentials, cancelling in-flight workflows and scaling the agent to zero. | Must | **Done** with a ValidatingAdmissionPolicy instead of a webhook: `make test-kill-switch` (one command; the flag stops the agent's claims and proposals, pods and tokens in its namespace; the ServiceAccount is recreated, so a stolen token fails even for reads; the agent's Job is suspended and can't come back; its sandbox is released; open proposals are cancelled by the controller; missing or garbled flag means stopped) and `make test-durable` (running Temporal workflows terminated, the worker scaled to zero) |
 | P2-22 | A tested decommission / break-glass runbook for the kill switch. | Should | **Done**: [docs/runbooks/kill-switch.md](../../runbooks/kill-switch.md); stop, check, resume and fail-closed cases run by `make test-kill-switch` |
 
 ### Durable execution
 
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
-| P2-30 | The agent pauses and resumes across approvals that take hours (Temporal workflow or LangGraph `interrupt`). | Must | Planned; engine is an open question |
-| P2-31 | Demo: a pod restart mid-approval loses no state. | Should | Planned |
+| P2-30 | The agent pauses and resumes across approvals that take hours (Temporal workflow or LangGraph `interrupt`). | Must | **Done** with Temporal: `make test-durable` (each task is a `ChangeWorkflow` that proposes once, idempotently, and waits in heartbeating poll activities; it survives the worker being down for the whole approval; a long wait continues as new with its progress, so history stays bounded; every outcome reaches the workflow). Limit: [GAP-03](../../known-gaps.md#gap-03-temporals-frontend-has-no-authentication) |
+| P2-31 | Demo: a pod restart mid-approval loses no state. | Should | **Done**: `make test-durable` (worker and Temporal server pods both deleted mid-approval; the workflow resumes waiting, applies on approval, and proposed exactly once) |
 
 ### Review experience and oversight
 

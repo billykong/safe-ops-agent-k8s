@@ -6,6 +6,7 @@ Weaknesses we know about, have reproduced, and haven't closed yet. Each has an I
 | --- | --- | --- | --- | --- |
 | [GAP-01](#gap-01-domain-fronting-through-the-pypi-egress-allowlist) | Domain fronting through the PyPI egress allowlist | High for sandboxes with egress; none for default sandboxes | Open | [P1-13](prd/projects/p1-sandboxed-code-exec.md) |
 | [GAP-02](#gap-02-admission-guards-cant-protect-their-own-configuration) | Admission guards can't protect their own configuration | Low today (the agent has no such RBAC); critical if that RBAC is ever granted | Open (inherent; mitigated by RBAC tests) | [P2-13, P2-14, P2-21](prd/projects/p2-approval-gate.md) |
+| [GAP-03](#gap-03-temporals-frontend-has-no-authentication) | Temporal's frontend has no authentication | Low (only the agent's worker can reach it, and it can already do what the API allows) | Open (accepted for the dev server) | [P2-30](prd/projects/p2-approval-gate.md) |
 
 ## GAP-01: domain fronting through the PyPI egress allowlist
 
@@ -84,3 +85,28 @@ None while the agent has no RBAC on admission configuration, impersonation, esca
 
 Open, inherent to in-cluster admission control. Mitigated by keeping and testing the RBAC exclusions.
 
+## GAP-03: Temporal's frontend has no authentication
+
+**Found:** 2026-10-07, P2 milestone 5. **Reproduced by:** `make test-durable`, section "Temporal's network fence" (the controls around it; the gap itself is a property of the deployment).
+
+### What's wrong
+
+The agent's workflows run on Temporal's development server (`projects/02-approval-gate/durable/manifests/10-temporal.yaml`), which has no authentication or authorization: any client that reaches port 7233 can start, signal, query, terminate or reset any workflow in any namespace, and read every workflow's history, inputs and results included.
+
+### Impact
+
+Limited by the network policy: only pods labelled `app: agent-worker` in the `agent` namespace can connect (`make test-durable` checks that other agent pods, other namespaces and sandboxes can't). That pod is the agent itself, so the gap gives the agent nothing over its own work it couldn't already do: it could terminate or rewrite its own workflows, or start new ones, each of which can only propose ChangeRequests through the same RBAC and admission. It can't approve, apply or bypass anything through Temporal. The exposure grows if anything else is ever allowed to reach Temporal, or if workflow inputs start carrying secrets (they mustn't: P3 keeps secrets in gateways).
+
+The dev server is also a single process with SQLite on one volume: no high availability, and losing the volume loses in-flight workflows (the ChangeRequests, the record that matters, are unaffected).
+
+### Options
+
+| Option | Closes it? | Cost |
+| --- | --- | --- |
+| Temporal server with mTLS, a claim mapper and an authorizer (per-namespace roles from client certificates or JWTs) | Yes | Production deployment (separate services, Postgres), certificate management |
+| Temporal Cloud | Yes | External dependency; data leaves the cluster |
+| Keep the network fence, and keep secrets out of workflow inputs | Narrows it | Already done |
+
+### Status
+
+Open, accepted for the development server. Revisit when Temporal moves to a production-style deployment or any second client needs access.

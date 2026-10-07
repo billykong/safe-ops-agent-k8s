@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch
+.PHONY: client-image up down node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -149,6 +149,21 @@ test-approval:
 
 test-agent-guard:
 	./scripts/test-agent-guard.sh
+
+# P2 milestone 5: Temporal and the agent as a Temporal worker.
+DURABLE := $(P2)/durable
+durable:
+	$(call preload,temporalio/temporal:1.9.1)
+	docker build -t approval-agent:dev $(DURABLE)/agent
+	kind load docker-image approval-agent:dev --name $(CLUSTER)
+	$(KUBECTL) apply -f $(DURABLE)/manifests/00-namespace.yaml
+	$(KUBECTL) apply -f $(DURABLE)/manifests/
+	$(KUBECTL) -n agent rollout restart deploy/agent-worker
+	$(KUBECTL) -n temporal rollout status deploy/temporal --timeout=180s
+	$(KUBECTL) -n agent rollout status deploy/agent-worker --timeout=180s
+
+test-durable:
+	./scripts/test-durable.sh
 
 test-budget:
 	./scripts/test-budget.sh
