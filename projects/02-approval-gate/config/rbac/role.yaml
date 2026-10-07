@@ -7,6 +7,7 @@ rules:
 - apiGroups:
   - approval.safe-ops.io
   resources:
+  - changebudgets
   - changerequests
   verbs:
   - get
@@ -15,11 +16,27 @@ rules:
 - apiGroups:
   - approval.safe-ops.io
   resources:
+  - changebudgets/status
   - changerequests/status
   verbs:
   - get
   - patch
   - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: approval-controller
+  namespace: approval-system
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

@@ -2,7 +2,7 @@
 
 **Goal:** the agent never changes the cluster directly. It proposes; a human approves; a small trusted controller applies. Nothing the agent can do approves, alters or bypasses that flow. Covers goal G2.
 
-Status: **milestones 1-3 done** (CRD, controller, agent fence; authenticated approver, hash binding, expiry, CLI; admission guard on the agent's writes). Implementation: [projects/02-approval-gate/](../../../projects/02-approval-gate/README.md). Depends on P1.
+Status: **milestones 1-4 done** (CRD, controller, agent fence; authenticated approver, hash binding, expiry, CLI; admission guard on the agent's writes; change budget and kill switch). Implementation: [projects/02-approval-gate/](../../../projects/02-approval-gate/README.md). Depends on P1.
 
 ## User stories
 
@@ -33,15 +33,15 @@ Status: **milestones 1-3 done** (CRD, controller, agent fence; authenticated app
 | P2-11 | The approver is recorded from the authenticated request identity, not from a field in the object. Approval requires an authenticated human. | Must | **Done**: `make test-approval` (a MutatingAdmissionPolicy overwrites `approver` with the authenticated username; a ValidatingAdmissionPolicy requires group `safe-ops:approvers` and no service account; approvers authenticate with client certificates from `scripts/new-approver.sh`) |
 | P2-12 | Approval binds to a content hash of the spec and expires. | Must | **Done**: `make test-approval` (the hash covers UID, spec, pre-state, plan and rollback; another hash is discarded; expiry by the controller's clock, `approvalWindowSeconds` capped at a day) |
 | P2-13 | An admission webhook rejects direct writes to managed resources by the agent's identity, fail-closed and scoped to that identity. | Must | **Done** as a ValidatingAdmissionPolicy, not a webhook (in-process: no TLS or extra service to fail): `make test-agent-guard` (with the agent's RBAC deliberately widened, direct writes are still refused; the agent's own work and other identities are unaffected). Limit: [GAP-02](../../known-gaps.md#gap-02-admission-guards-cant-protect-their-own-configuration) |
-| P2-14 | The agent has no RBAC on webhooks, policies, the kill switch, CRDs or RBAC objects, and can't create pods (SEC-06). | Must | **Partial**: no RBAC on CRDs, RBAC objects, admission policies and webhooks, impersonation, escalate/bind, token minting, CSRs, the controller or pods (`make test-approval`, `make test-agent-guard`); the kill switch doesn't exist yet |
+| P2-14 | The agent has no RBAC on webhooks, policies, the kill switch, CRDs or RBAC objects, and can't create pods (SEC-06). | Must | **Done**: no RBAC on CRDs, RBAC objects, admission policies and webhooks, impersonation, escalate/bind, token minting, CSRs, the controller, pods, the change budget or the kill switch flag (`make test-approval`, `make test-agent-guard`, `make test-budget`, `make test-kill-switch`). Limit: [GAP-02](../../known-gaps.md#gap-02-admission-guards-cant-protect-their-own-configuration) |
 
 ### Bounding and stopping
 
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
-| P2-20 | Change budget: N autonomous changes, then the agent must ask. | Must | Planned |
-| P2-21 | Kill switch: a flag checked by a fail-closed admission webhook, plus revoking the agent's credentials, cancelling in-flight workflows and scaling the agent to zero. | Must | Planned |
-| P2-22 | A tested decommission / break-glass runbook for the kill switch. | Should | Planned |
+| P2-20 | Change budget: N autonomous changes, then the agent must ask. | Must | **Done**: `make test-budget` (a `ChangeBudget` of N eligible changes per rolling window, eligibility decided by code: action types, namespaces, replica range; grants recorded with an optimistic lock before applying; past the budget, or ineligible, a change waits for a human; agent and approvers can't change it, nobody but the controller can record a grant) |
+| P2-21 | Kill switch: a flag checked by a fail-closed admission webhook, plus revoking the agent's credentials, cancelling in-flight workflows and scaling the agent to zero. | Must | **Done** with a ValidatingAdmissionPolicy instead of a webhook: `make test-kill-switch` (one command; the flag stops the agent's claims and proposals, pods and tokens in its namespace; the ServiceAccount is recreated, so a stolen token fails even for reads; the agent's Job is suspended and can't come back; its sandbox is released; open proposals are cancelled by the controller; missing or garbled flag means stopped) |
+| P2-22 | A tested decommission / break-glass runbook for the kill switch. | Should | **Done**: [docs/runbooks/kill-switch.md](../../runbooks/kill-switch.md); stop, check, resume and fail-closed cases run by `make test-kill-switch` |
 
 ### Durable execution
 
@@ -54,7 +54,7 @@ Status: **milestones 1-3 done** (CRD, controller, agent fence; authenticated app
 
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
-| P2-40 | The review packet is computed by code, not an LLM: exact diff and server-side dry run, blast radius, policy findings, budget remaining, rollback and whether it was tested. The model's rationale is secondary and labelled. | Must | Planned |
+| P2-40 | The review packet is computed by code, not an LLM: exact diff and server-side dry run, blast radius, policy findings, budget remaining, rollback and whether it was tested. The model's rationale is secondary and labelled. | Must | **Partial**: the controller computes the exact patch, rollback and hash; the model's account is labelled as unverified (`approvalctl show`); budget remaining via `approvalctl budget`. Dry run, policy findings and "rollback tested" are milestone 6 |
 | P2-41 | Approval via a CLI first; a Slack-style webhook only with real authentication. | Must | **Done** for the CLI: `approvalctl` (`make test-approval`). No chat channel |
 | P2-42 | Oversight metrics: approval rate, time to approve, edit/reject rate per approver. | Should | Planned (feeds P4) |
 | P2-43 | Seeded known-bad proposals measure approver catch rate. | Could | Planned |

@@ -32,7 +32,7 @@ Reference documents (read 2026-09-29):
 | SEC-03 | The agent never holds the model API key or tool secrets. Gateways hold them and authenticate the agent by workload identity. | Must | Planned (P3) |
 | SEC-04 | The agent cannot approve its own change: approval is in the status subresource; the agent has no `update` on `changerequests/status`; the approver is recorded from the authenticated request identity; approval needs an authenticated human. | Must | **Done**: `make test-approval` (RBAC, plus admission policies that stamp the authenticated approver and require a human in `safe-ops:approvers`) |
 | SEC-05 | Each approval is bound to exactly what was approved: a content hash of an immutable spec (CEL `self == oldSelf`), an expiry, and a live-state re-check before apply. | Must | **Done**: `make test-approval` (review hash over spec, pre-state, plan and rollback; immutable spec; expiry; live-state re-check) |
-| SEC-06 | The agent cannot touch its own guardrails. Its RBAC excludes: admission webhooks and policy objects; the kill switch; CRDs and RBAC objects (no `escalate`, `bind`, `impersonate`); `secrets`, `pods/exec`, `serviceaccounts/token`, `nodes/proxy`; creating pods. | Must | **Partial**: excluded and tested for the P1 and P2 agent identity (`make test-agent`, `make test-approval`, `make test-agent-guard`), with an admission backstop on its writes; the kill switch doesn't exist yet. Admission can't protect admission configuration itself (GAP-02), so the RBAC exclusions are load-bearing |
+| SEC-06 | The agent cannot touch its own guardrails. Its RBAC excludes: admission webhooks and policy objects; the kill switch; CRDs and RBAC objects (no `escalate`, `bind`, `impersonate`); `secrets`, `pods/exec`, `serviceaccounts/token`, `nodes/proxy`; creating pods. | Must | **Done**: excluded and tested for the P1 and P2 agent identity (`make test-agent`, `make test-approval`, `make test-agent-guard`, `make test-kill-switch`), with an admission backstop on its writes. Admission can't protect admission configuration itself (GAP-02), so the RBAC exclusions are load-bearing |
 | SEC-07 | Content-level admission for agent identities: RBAC grants verbs; admission policy constrains content (approved references only, no scope-widening fields). | Must | **Done** for SandboxClaims (`make test-agent`), ChangeRequest approvals (`make test-approval`), and all other agent writes (default-deny guard, `make test-agent-guard`) |
 | SEC-08 | The write-capable executor is small and deterministic: no LLM, no free-text parsing; it applies only typed, approved, hash-matched artefacts with namespace-scoped credentials (never cluster-admin). | Must | **Done**: `make test-approval` (typed actions, no LLM, hash-matched approvals, `get`/`patch` on Deployments in `workloads` only) |
 
@@ -41,7 +41,7 @@ Reference documents (read 2026-09-29):
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
 | SEC-10 | Guardrail webhooks fail closed (`failurePolicy: Fail`) for the agent's identity, scoped with `matchConditions` so an outage blocks the agent, not the cluster. | Must | **Partial**: set on the claim policy (built-in VAP, no webhook to fail); webhook outage test planned (P2) |
-| SEC-11 | The kill switch flips a flag checked by a fail-closed webhook, **and** revokes the agent's credentials, cancels in-flight workflows, and scales the agent to zero. It is tested as part of the evals. | Must | Planned (P2, P4) |
+| SEC-11 | The kill switch flips a flag checked by a fail-closed webhook, **and** revokes the agent's credentials, cancels in-flight workflows, and scales the agent to zero. It is tested as part of the evals. | Must | **Done** in P2 as a ValidatingAdmissionPolicy (no webhook to fail) plus `scripts/kill-switch.sh`: `make test-kill-switch`. Joins the eval suite in P4 |
 | SEC-12 | If the model API is down, the system degrades to "escalate everything", never to "act without the model's checks". | Should | Planned (P3) |
 
 ### Human oversight
@@ -76,7 +76,7 @@ To be kept under `docs/` as the projects land.
 | Threat model mapping each OWASP ASI risk to a control or an accepted residual risk | MAP 4, MANAGE 1.3-1.4 | Summary above; full version planned |
 | Inventory / AI-BOM of models, prompts, tools and MCP servers | GOVERN 1.6, MAP 4.2 | Planned (P3) |
 | Human oversight design: what needs approval, who approves, oversight metrics | MAP 3.5, GOVERN 3.2, MEASURE 2.8 | Planned (P2) |
-| Kill-switch / deactivation and decommission runbook, tested | MANAGE 2.4, GOVERN 1.7 | Planned (P2) |
+| Kill-switch / deactivation and decommission runbook, tested | MANAGE 2.4, GOVERN 1.7 | **Done**: `docs/runbooks/kill-switch.md`, `make test-kill-switch` |
 | Red-team plan, cadence and results log | MEASURE 2.7, MANAGE 4.1 | Planned (P1 M4, P3) |
 | Incident / near-miss log and change log | MANAGE 4.3, GOVERN 4.3 | Partial: P1 findings log |
 | Third-party failure plan (model API down: escalate everything) | GOVERN 6.2, MANAGE 3.1 | Planned (P3) |

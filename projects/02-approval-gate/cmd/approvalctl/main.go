@@ -4,6 +4,7 @@
 //	approvalctl ... show NAME
 //	approvalctl ... approve NAME [--comment TEXT] [--yes] [--wait 30s]
 //	approvalctl ... reject  NAME [--comment TEXT] [--yes] [--wait 30s]
+//	approvalctl ... budget
 //
 // approve/reject show the review packet the controller recorded, ask for
 // confirmation, then write the decision to the status subresource with the
@@ -11,6 +12,9 @@
 // controller re-planned while you were reading, the write fails instead of
 // approving something you didn't see. The cluster records you as the
 // approver from your authenticated identity, whatever this tool sends.
+//
+// budget shows the namespace's change budget: how many changes the
+// controller may still apply without a human, and which ones.
 package main
 
 import (
@@ -25,6 +29,7 @@ import (
 	"time"
 
 	authnv1 "k8s.io/api/authentication/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -38,7 +43,7 @@ func main() {
 	kctx := flag.String("context", "", "kubeconfig context")
 	ns := flag.String("n", "approvals", "namespace")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: approvalctl [--kubeconfig F] [--context C] [-n NS] list | show NAME | approve NAME | reject NAME")
+		fmt.Fprintln(os.Stderr, "usage: approvalctl [--kubeconfig F] [--context C] [-n NS] list | show NAME | approve NAME | reject NAME | budget")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -63,6 +68,8 @@ func main() {
 		need(args, 2)
 		cr := get(ctx, c, *ns, args[1])
 		printPacket(os.Stdout, cr)
+	case "budget":
+		budget(ctx, c, *ns)
 	case "approve", "reject":
 		need(args, 2)
 		fs := flag.NewFlagSet(args[0], flag.ExitOnError)
@@ -91,6 +98,8 @@ func list(ctx context.Context, c client.Client, ns string) {
 		approver := "-"
 		if a := cr.Status.Approval; a != nil {
 			approver = a.Approver
+		} else if g := cr.Status.BudgetGrant; g != nil {
+			approver = "budget/" + g.Budget
 		}
 		t := cr.Spec.Action.Target
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s/%s\t%s\t%s\n", cr.Name, cr.Status.Phase, cr.Spec.Action.Type,
@@ -193,6 +202,35 @@ func printPacket(out *os.File, cr *v1.ChangeRequest) {
 	}
 	if ap := st.Approval; ap != nil {
 		row("decision", fmt.Sprintf("%s by %s at %s", ap.Decision, ap.Approver, ap.Time.UTC().Format(time.RFC3339)))
+	}
+	if g := st.BudgetGrant; g != nil {
+		row("decision", fmt.Sprintf("approved by change budget %s at %s (no human)", g.Budget, g.Time.UTC().Format(time.RFC3339)))
+	}
+	die(w.Flush())
+}
+
+func budget(ctx context.Context, c client.Client, ns string) {
+	var b v1.ChangeBudget
+	err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: v1.DefaultBudgetName}, &b)
+	if apierrors.IsNotFound(err) {
+		fmt.Printf("no change budget in %s: every change waits for an approver\n", ns)
+		return
+	}
+	die(err)
+	s := b.Spec
+	window := time.Duration(s.WindowSeconds) * time.Second
+	var live []v1.Grant
+	for _, g := range b.Status.Grants {
+		if time.Since(g.Time.Time) < window {
+			live = append(live, g)
+		}
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintf(w, "ChangeBudget\t%s/%s\n", ns, b.Name)
+	fmt.Fprintf(w, "remaining\t%d of %d autonomous changes in the last %s\n", max(int(s.MaxChanges)-len(live), 0), s.MaxChanges, window)
+	fmt.Fprintf(w, "covers\t%v in namespaces %v; scaling to %d-%d replicas\n", s.Actions, s.Namespaces, s.MinReplicas, s.MaxReplicas)
+	for _, g := range live {
+		fmt.Fprintf(w, "spent\t%s at %s (frees at %s)\n", g.ChangeRequest, g.Time.UTC().Format(time.RFC3339), g.Time.Add(window).UTC().Format(time.RFC3339))
 	}
 	die(w.Flush())
 }

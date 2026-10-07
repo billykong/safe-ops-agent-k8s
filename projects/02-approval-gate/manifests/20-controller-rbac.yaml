@@ -1,6 +1,7 @@
 # Binds the controller's generated roles (../config/rbac/role.yaml): read
-# ChangeRequests and write their status, cluster-wide; get/patch Deployments
-# in the workloads namespace only. Never cluster-admin (P2-03).
+# ChangeRequests and ChangeBudgets and write their status, cluster-wide;
+# get/patch Deployments in the workloads namespace only; read ConfigMaps
+# (the kill switch) in its own namespace. Never cluster-admin (P2-03).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -25,6 +26,22 @@ kind: RoleBinding
 metadata:
   name: approval-controller
   namespace: workloads
+subjects:
+- kind: ServiceAccount
+  name: approval-controller
+  namespace: approval-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: approval-controller
+---
+# Read-only access to the kill switch flag (90-kill-switch.yaml), which
+# lives in the controller's own namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: approval-controller
+  namespace: approval-system
 subjects:
 - kind: ServiceAccount
   name: approval-controller

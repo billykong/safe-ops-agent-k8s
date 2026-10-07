@@ -27,6 +27,9 @@ spec:
     - jsonPath: .status.approval.approver
       name: Approver
       type: string
+    - jsonPath: .status.budgetGrant.budget
+      name: Budget
+      type: string
     - jsonPath: .status.expiresAt
       name: Expires
       type: date
@@ -209,6 +212,28 @@ spec:
                 - reviewHash
                 - time
                 type: object
+              budgetGrant:
+                description: |-
+                  budgetGrant: set instead of a human approval when the change budget
+                  approved the change.
+                properties:
+                  budget:
+                    description: 'budget: the ChangeBudget that paid for this change.'
+                    type: string
+                  reviewHash:
+                    description: |-
+                      reviewHash: the packet the grant is for. Re-planning after drift
+                      changes the hash, and the grant no longer applies.
+                    pattern: ^sha256:[0-9a-f]{64}$
+                    type: string
+                  time:
+                    format: date-time
+                    type: string
+                required:
+                - budget
+                - reviewHash
+                - time
+                type: object
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -286,6 +311,7 @@ spec:
                 - Rejected
                 - Failed
                 - Expired
+                - Cancelled
                 type: string
               plan:
                 description: |-

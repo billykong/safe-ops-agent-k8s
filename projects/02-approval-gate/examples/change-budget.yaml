@@ -1,0 +1,17 @@
+# A change budget (P2-20): up to 3 restarts or small scale changes of
+# Deployments in workloads per hour apply without a human; anything else,
+# or anything past the third, waits for an approver. Operators write this;
+# the agent can't. Not applied by `make p2`: without a budget, every change
+# waits for a human.
+apiVersion: approval.safe-ops.io/v1alpha1
+kind: ChangeBudget
+metadata:
+  name: default
+  namespace: approvals
+spec:
+  maxChanges: 3
+  windowSeconds: 3600
+  actions: [RestartDeployment, ScaleDeployment]
+  namespaces: [workloads]
+  minReplicas: 1
+  maxReplicas: 3

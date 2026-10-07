@@ -1,0 +1,106 @@
+# Kill switch, admission half (P2-21). The flag is the ConfigMap
+# approval-system/agent-kill-switch: the agent runs only while its data.mode
+# is exactly "run". `make p2` creates it (mode run) only if it's missing, so
+# re-deploying never un-stops a stopped agent. scripts/kill-switch.sh flips
+# it and does the rest: scales the agent to zero, revokes its credentials,
+# releases its sandboxes (docs/runbooks/kill-switch.md).
+#
+# While stopped, this refuses:
+#   - the agent creating SandboxClaims or ChangeRequests (everything else it
+#     might write is already refused by agent-write-guard; deleting its own
+#     claims stays allowed, so a stopping agent can clean up);
+#   - creating pods in the agent namespace, by anyone (so a Job, a restarted
+#     Deployment or a human can't bring the agent back);
+#   - minting tokens for the agent namespace's service accounts, by anyone
+#     (the kubelet can't refresh a surviving pod's token).
+# Reads don't pass through admission; revoking the agent's credentials
+# covers those.
+#
+# Fail closed: a missing flag denies (parameterNotFoundAction: Deny). The
+# API server applies that denial before matchConditions are evaluated, to
+# every request the binding matches, whoever makes it. So the bindings
+# below match only the agent's own surfaces: with the flag deleted, nobody
+# can create claims or ChangeRequests in their namespaces, or pods and
+# tokens in the agent namespace, and nothing else in the cluster is
+# affected. Matching more broadly (all resources, like agent-write-guard)
+# would turn a deleted ConfigMap into a cluster-wide write outage.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-kill-switch
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["extensions.agents.x-k8s.io"]
+      apiVersions: ["*"]
+      resources: ["sandboxclaims"]
+      operations: ["CREATE"]
+    - apiGroups: ["approval.safe-ops.io"]
+      apiVersions: ["*"]
+      resources: ["changerequests"]
+      operations: ["CREATE"]
+    - apiGroups: [""]
+      apiVersions: ["*"]
+      resources: ["pods", "serviceaccounts/token"]
+      operations: ["CREATE"]
+  matchConditions:
+  - name: the-agent
+    expression: >-
+      request.userInfo.username == "system:serviceaccount:agent:agent" ||
+      request.?namespace.orValue("") == "agent"
+  validations:
+  - expression: params.?data.?mode.orValue("") == "run"
+    messageExpression: >-
+      "agent-kill-switch: the agent is stopped (" + params.?data.?reason.orValue("no reason given") +
+      "); see docs/runbooks/kill-switch.md"
+---
+# The agent namespace: its pods and their tokens.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-kill-switch-runtime
+spec:
+  policyName: agent-kill-switch
+  validationActions: [Deny]
+  paramRef:
+    name: agent-kill-switch
+    namespace: approval-system
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels: {kubernetes.io/metadata.name: agent}
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: ["*"]
+      resources: ["pods", "serviceaccounts/token"]
+      operations: ["CREATE"]
+---
+# The agent's two ways to act: claiming a sandbox and proposing a change.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-kill-switch-actions
+spec:
+  policyName: agent-kill-switch
+  validationActions: [Deny]
+  paramRef:
+    name: agent-kill-switch
+    namespace: approval-system
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - {key: kubernetes.io/metadata.name, operator: In, values: [sandboxes, approvals]}
+    resourceRules:
+    - apiGroups: ["extensions.agents.x-k8s.io"]
+      apiVersions: ["*"]
+      resources: ["sandboxclaims"]
+      operations: ["CREATE"]
+    - apiGroups: ["approval.safe-ops.io"]
+      apiVersions: ["*"]
+      resources: ["changerequests"]
+      operations: ["CREATE"]

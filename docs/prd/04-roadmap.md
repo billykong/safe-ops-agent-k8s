@@ -38,8 +38,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 1. **Done.** `ChangeRequest` CRD with immutable spec, status-subresource approval, and the controller (kubebuilder) (`make p2 test-approval`).
 2. **Done.** Approval CLI (`approvalctl`) with authenticated approver identity (admission policies, client-certificate approvers); hash binding and expiry (`make test-approval`).
 3. **Done.** Admission guard rejecting direct writes by the agent's identity, as a ValidatingAdmissionPolicy (`make test-agent-guard`); limit recorded as GAP-02.
-4. **Next.** Change budget and kill switch.
-5. Durable execution across long approvals; pod-restart demo.
+4. **Done.** Change budget (`make test-budget`) and kill switch with its runbook (`make test-kill-switch`, `docs/runbooks/kill-switch.md`).
+5. **Next.** Durable execution across long approvals; pod-restart demo.
 6. Deterministic approval packet and oversight metrics.
 
 ### P3: identity, tools and policy

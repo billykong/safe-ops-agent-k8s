@@ -9,7 +9,7 @@ Requirements and status: [docs/prd/projects/p2-approval-gate.md](../../docs/prd/
 1. [x] `ChangeRequest` CRD with immutable spec, status-subresource approval, and the controller (kubebuilder)
 2. [x] Approval CLI (`approvalctl`) with authenticated approver identity; hash binding and expiry. `make p2 test-approval`: 58 checks
 3. [x] Admission guard rejecting direct writes by the agent's identity (a ValidatingAdmissionPolicy). `make test-agent-guard`: 33 checks
-4. [ ] Change budget and kill switch
+4. [x] Change budget and kill switch, with a runbook. `make test-budget`: 33 checks; `make test-kill-switch`: 46 checks
 5. [ ] Durable execution across long approvals
 6. [ ] Deterministic approval packet and oversight metrics
 
@@ -52,7 +52,12 @@ sequenceDiagram
 - **Time of check vs time of use.** Before applying, the controller compares the target's live state with the recorded pre-state. If anything changed (any spec edit bumps the generation), it clears the approval, re-proposes from live state, and waits in `NeedsReapproval`.
 - **Scope.** An action outside its declared scope is rejected, and a later approval doesn't revive it.
 - **Backstop on the agent's writes** (`manifests/80-agent-write-guard.yaml`). A ValidatingAdmissionPolicy matched only to the agent's identity refuses every create, update, delete or connect (exec included) outside an allowlist: create/delete SandboxClaims in `sandboxes`, create ChangeRequests in `approvals`, and self-review calls. It fails closed. If the agent's RBAC is ever widened by mistake, it still can't change the cluster except by proposing. A policy rather than a webhook: same admission point, but evaluated in the API server, with no TLS or extra service to fail. It can't protect admission configuration itself ([GAP-02](../../docs/known-gaps.md#gap-02-admission-guards-cant-protect-their-own-configuration)).
-- **The controller's reach** (`config/rbac/role.yaml`, generated from markers): read ChangeRequests and write their status; `get`/`patch` Deployments in `workloads` only. No create/delete, no pods, no other namespaces. Default-deny network policy with egress to the API server only.
+- **Change budget** (`ChangeBudget` named `default` in the request's namespace; example in `examples/change-budget.yaml`). Up to `maxChanges` changes per rolling `windowSeconds` apply without a human, if code says they're eligible: an allowed action type, an allowed target namespace, and for scaling a replica count within `minReplicas`-`maxReplicas` (so never to zero by default). The controller consults it once, right after recording the plan: it records the grant in the budget's status (with `resourceVersion` as a precondition, keyed by the request's UID so a retry doesn't pay twice), then sets `status.budgetGrant` bound to the review hash and applies through the same drift check as a human approval. Anything ineligible, or past the budget, waits for an approver and keeps waiting even if budget frees up later; drift after a grant needs a human too. Without a budget, every change waits (the default; `make p2` installs none). Operators write the budget; approvers can read it (`approvalctl budget`); the agent can do neither, and only the controller may write `budgetGrant`.
+- **Kill switch** (`manifests/90-kill-switch.yaml`, `scripts/kill-switch.sh`, runbook [docs/runbooks/kill-switch.md](../../docs/runbooks/kill-switch.md)). The flag is ConfigMap `approval-system/agent-kill-switch`; the agent runs only while `mode` is exactly `run`. One command (`kill-switch.sh stop --reason ...`) sets it to `stop`, then suspends and deletes the agent's workloads, recreates its ServiceAccount (revoking every token for it, copies outside the cluster included), and releases its sandboxes. From the flag on:
+  - a ValidatingAdmissionPolicy, with the ConfigMap as its parameter, refuses the agent's new claims and proposals, and any new pod or token in the `agent` namespace, from anyone. A Job that's un-suspended can't bring the agent back;
+  - the controller cancels every request that hasn't started applying (`Cancelled`), whoever approved it, and applies nothing more. It watches the flag (caching only that one ConfigMap) and treats missing or unreadable as stopped.
+  `make p2` creates the flag only if it's missing, so re-deploying never resumes a stopped agent.
+- **The controller's reach** (`config/rbac/role.yaml`, generated from markers): read ChangeRequests and ChangeBudgets and write their status; `get`/`patch` Deployments in `workloads` only; read ConfigMaps in its own namespace (the flag). No create/delete, no pods, no other namespaces. Default-deny network policy with egress to the API server only.
 
 ## Findings
 1. **Kustomize's `namespace:` would have broken the controller's scoping.** It rewrites every namespaced object, including the controller's `workloads` Role, which would land in the controller's own namespace. Deployed with plain manifests instead.
@@ -64,8 +69,16 @@ sequenceDiagram
 7. **Admission can't guard admission configuration** ([GAP-02](../../docs/known-gaps.md#gap-02-admission-guards-cant-protect-their-own-configuration)). With widened RBAC, the agent could delete the guard and the approval policies: Kubernetes never applies admission policies or webhooks to their own configuration objects. Neither can it see impersonation, or escalate/bind on RBAC. The suite asserts the agent holds none of these.
 8. **The suite's own helper talked to the wrong cluster.** A `sh -c` child shell didn't inherit `scripts/lib.sh`'s context pin and ran against whatever context was current (another project's cluster). That's P1 finding 17 again, this time in the test harness. The suite pipes into the pinned function instead.
 
+9. **A missing admission parameter denies everything the binding matches, whoever asks.** With `parameterNotFoundAction: Deny`, the API server refuses before evaluating `matchConditions` (probed: a policy whose match condition was always false still denied every request in scope). A kill switch matched like `agent-write-guard` (all resources, narrowed to the agent by a match condition) would turn a deleted ConfigMap into a cluster-wide write outage. Its bindings match only the agent's surfaces: claims and proposals in `sandboxes` and `approvals`, pods and tokens in `agent`. A missing flag freezes exactly those, for everyone, and nothing else.
+10. **Re-deploying could have un-stopped the agent.** With the flag in `manifests/`, `make p2` would re-apply `mode: run` over a `stop`. The flag isn't a manifest: `make p2` creates it only if missing.
+11. **Admission can't stop reads.** A copy of the agent's token kept listing proposals with the flag at `stop`. Recreating the ServiceAccount ended it: bound tokens carry the account's UID, and the API server refuses tokens for a UID that no longer exists. RoleBindings name the account, so they carry over to the new one; the copy stays dead after resuming.
+12. **A stopping agent can still clean up.** The switch refuses claim creation but not deletion, so the agent's SIGTERM handler released its sandbox before the script's own release step ran (it found 0 claims). Refusing everything would have left claims for the script, or the `shutdownTime` backstop, to collect.
+13. **Which policy reports a denial isn't stable.** After the policies were re-applied, a status write by the agent's identity was refused by `agent-write-guard` rather than the approval policy, failing a test that expected the latter's message. Both refusals were correct. The check now uses a different service account, so it tests the approval policy alone.
+14. **The budget is consulted once.** A request that wasn't eligible or found the budget spent keeps waiting for a human, even after the window frees budget, so nothing changes under an approver who's reviewing it. The controller runs one worker, so concurrent proposals are paid for one at a time; the precondition on the budget's `resourceVersion` is what keeps more workers or replicas from overspending.
+
 ## Not yet (next milestones)
-- No change budget or kill switch yet (milestone 4).
+- No durable execution: an agent waiting on approval holds no workflow state across restarts (milestone 5).
+- The review packet has no server-side dry run, policy findings or tested rollback yet (milestone 6).
 
 ## Layout
 Kubebuilder layout, trimmed to what's used: `api/` (types), `internal/controller/` (reconciler and its pure decision functions, unit-tested in `logic_test.go`), `config/crd/bases/` and `config/rbac/role.yaml` (generated by `make manifests`), `manifests/` (hand-written deployment: namespaces, bindings, controller, agent role, network policy, demo workload). Kustomize overlays aren't used: their namespace rewrite would move the controller's `workloads` Role into its own namespace.
@@ -78,6 +91,9 @@ The controller binary is built on the host (`make build`; Go from `scripts/setup
 make p2                                 # build controller and CLI, apply CRD, RBAC, policies, controller
 make test-approval                      # 58 checks
 make test-agent-guard                   # 33 checks; temporarily widens the agent's RBAC
+make test-budget                        # 33 checks; creates and removes a ChangeBudget
+make test-kill-switch                   # 46 checks; stops a running agent, resumes, leaves mode=run
+./scripts/kill-switch.sh status         # stop --reason TEXT | resume --reason TEXT
 ./scripts/new-approver.sh alice         # writes ~/.kube/safe-ops-approver-alice.kubeconfig
 export KUBECONFIG=~/.kube/safe-ops-approver-alice.kubeconfig
 projects/02-approval-gate/bin/approvalctl list
