@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval
+.PHONY: client-image up down node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -142,3 +142,6 @@ p2:
 
 test-approval:
 	./scripts/test-approval.sh
+
+test-agent-guard:
+	./scripts/test-agent-guard.sh

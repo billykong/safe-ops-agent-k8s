@@ -2,7 +2,7 @@
 
 **Goal:** the agent never changes the cluster directly. It proposes; a human approves; a small trusted controller applies. Nothing the agent can do approves, alters or bypasses that flow. Covers goal G2.
 
-Status: **milestones 1-2 done** (CRD, controller, agent fence; authenticated approver, hash binding, expiry, CLI). Implementation: [projects/02-approval-gate/](../../../projects/02-approval-gate/README.md). Depends on P1.
+Status: **milestones 1-3 done** (CRD, controller, agent fence; authenticated approver, hash binding, expiry, CLI; admission guard on the agent's writes). Implementation: [projects/02-approval-gate/](../../../projects/02-approval-gate/README.md). Depends on P1.
 
 ## User stories
 
@@ -32,8 +32,8 @@ Status: **milestones 1-2 done** (CRD, controller, agent fence; authenticated app
 | P2-10 | Approval lives in the `status` subresource; the agent's identity has no `update` on `changerequests/status`. | Must | **Done**: `make test-approval` (can-i and an actual self-approval attempt, forbidden) |
 | P2-11 | The approver is recorded from the authenticated request identity, not from a field in the object. Approval requires an authenticated human. | Must | **Done**: `make test-approval` (a MutatingAdmissionPolicy overwrites `approver` with the authenticated username; a ValidatingAdmissionPolicy requires group `safe-ops:approvers` and no service account; approvers authenticate with client certificates from `scripts/new-approver.sh`) |
 | P2-12 | Approval binds to a content hash of the spec and expires. | Must | **Done**: `make test-approval` (the hash covers UID, spec, pre-state, plan and rollback; another hash is discarded; expiry by the controller's clock, `approvalWindowSeconds` capped at a day) |
-| P2-13 | An admission webhook rejects direct writes to managed resources by the agent's identity, fail-closed and scoped to that identity. | Must | Planned |
-| P2-14 | The agent has no RBAC on webhooks, policies, the kill switch, CRDs or RBAC objects, and can't create pods (SEC-06). | Must | **Partial**: no RBAC on CRDs, RBAC objects, admission policies, CSRs, the controller or pods in `workloads` (`make test-approval`); webhooks and kill switch don't exist yet |
+| P2-13 | An admission webhook rejects direct writes to managed resources by the agent's identity, fail-closed and scoped to that identity. | Must | **Done** as a ValidatingAdmissionPolicy, not a webhook (in-process: no TLS or extra service to fail): `make test-agent-guard` (with the agent's RBAC deliberately widened, direct writes are still refused; the agent's own work and other identities are unaffected). Limit: [GAP-02](../../known-gaps.md#gap-02-admission-guards-cant-protect-their-own-configuration) |
+| P2-14 | The agent has no RBAC on webhooks, policies, the kill switch, CRDs or RBAC objects, and can't create pods (SEC-06). | Must | **Partial**: no RBAC on CRDs, RBAC objects, admission policies and webhooks, impersonation, escalate/bind, token minting, CSRs, the controller or pods (`make test-approval`, `make test-agent-guard`); the kill switch doesn't exist yet |
 
 ### Bounding and stopping
 

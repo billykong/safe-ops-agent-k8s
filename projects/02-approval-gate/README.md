@@ -8,7 +8,7 @@ Requirements and status: [docs/prd/projects/p2-approval-gate.md](../../docs/prd/
 ## Milestones
 1. [x] `ChangeRequest` CRD with immutable spec, status-subresource approval, and the controller (kubebuilder)
 2. [x] Approval CLI (`approvalctl`) with authenticated approver identity; hash binding and expiry. `make p2 test-approval`: 58 checks
-3. [ ] Admission webhook rejecting direct writes by the agent's identity
+3. [x] Admission guard rejecting direct writes by the agent's identity (a ValidatingAdmissionPolicy). `make test-agent-guard`: 33 checks
 4. [ ] Change budget and kill switch
 5. [ ] Durable execution across long approvals
 6. [ ] Deterministic approval packet and oversight metrics
@@ -51,6 +51,7 @@ sequenceDiagram
 - **`approvalctl`** (`cmd/approvalctl`): `list`, `show`, `approve`, `reject`. It shows the packet in three parts (the agent's free-text account, the typed action, and what the controller computed and will run), asks for confirmation, and writes the decision with the review hash, conditional on the `resourceVersion` it displayed.
 - **Time of check vs time of use.** Before applying, the controller compares the target's live state with the recorded pre-state. If anything changed (any spec edit bumps the generation), it clears the approval, re-proposes from live state, and waits in `NeedsReapproval`.
 - **Scope.** An action outside its declared scope is rejected, and a later approval doesn't revive it.
+- **Backstop on the agent's writes** (`manifests/80-agent-write-guard.yaml`). A ValidatingAdmissionPolicy matched only to the agent's identity refuses every create, update, delete or connect (exec included) outside an allowlist: create/delete SandboxClaims in `sandboxes`, create ChangeRequests in `approvals`, and self-review calls. It fails closed. If the agent's RBAC is ever widened by mistake, it still can't change the cluster except by proposing. A policy rather than a webhook: same admission point, but evaluated in the API server, with no TLS or extra service to fail. It can't protect admission configuration itself ([GAP-02](../../docs/known-gaps.md#gap-02-admission-guards-cant-protect-their-own-configuration)).
 - **The controller's reach** (`config/rbac/role.yaml`, generated from markers): read ChangeRequests and write their status; `get`/`patch` Deployments in `workloads` only. No create/delete, no pods, no other namespaces. Default-deny network policy with egress to the API server only.
 
 ## Findings
@@ -59,9 +60,12 @@ sequenceDiagram
 3. **A full status `Update` from the controller looked like tampering.** The controller re-serialized the whole status from its Go type, and an approval that didn't round-trip byte for byte (`"comment": ""`, dropped by `omitempty`) appeared changed. The policy correctly refused, and every CLI approval stalled in Pending. The controller now writes merge patches against the state it last read, with `resourceVersion` as a precondition, so it only sends what it changed. A regression check approves with an empty comment.
 4. **Admission policies have no clock.** CEL can't compare a client-written timestamp with "now", so expiry is judged by the controller against the `expiresAt` it set itself.
 5. **Retried conflicts are logged as errors.** `Reconciler error ... Operation cannot be fulfilled` lines are optimistic-lock conflicts, e.g. a human writing as the controller does; the reconcile reruns with fresh state. Expected, not a fault.
+6. **A fail-closed policy with one unguarded field read blocked everything.** In an admission request, empty fields such as `subResource` and `namespace` are absent, not `""`. Reading `request.subResource` directly raised "no such key", and `failurePolicy: Fail` turned that into denying the agent's legitimate claims and proposals. It would have taken the agent down on first use. Read optional fields with `request.?subResource.orValue("")`, and test the allowed paths, not just the denials.
+7. **Admission can't guard admission configuration** ([GAP-02](../../docs/known-gaps.md#gap-02-admission-guards-cant-protect-their-own-configuration)). With widened RBAC, the agent could delete the guard and the approval policies: Kubernetes never applies admission policies or webhooks to their own configuration objects. Neither can it see impersonation, or escalate/bind on RBAC. The suite asserts the agent holds none of these.
+8. **The suite's own helper talked to the wrong cluster.** A `sh -c` child shell didn't inherit `scripts/lib.sh`'s context pin and ran against whatever context was current (another project's cluster). That's P1 finding 17 again, this time in the test harness. The suite pipes into the pinned function instead.
 
 ## Not yet (next milestones)
-- Nothing stops the agent's identity from writing to resources a webhook should protect beyond RBAC (milestone 3), and there's no change budget or kill switch yet (milestone 4).
+- No change budget or kill switch yet (milestone 4).
 
 ## Layout
 Kubebuilder layout, trimmed to what's used: `api/` (types), `internal/controller/` (reconciler and its pure decision functions, unit-tested in `logic_test.go`), `config/crd/bases/` and `config/rbac/role.yaml` (generated by `make manifests`), `manifests/` (hand-written deployment: namespaces, bindings, controller, agent role, network policy, demo workload). Kustomize overlays aren't used: their namespace rewrite would move the controller's `workloads` Role into its own namespace.
@@ -73,6 +77,7 @@ The controller binary is built on the host (`make build`; Go from `scripts/setup
 ./scripts/setup-go.sh                   # once, no sudo: Go into ~/.local/go
 make p2                                 # build controller and CLI, apply CRD, RBAC, policies, controller
 make test-approval                      # 58 checks
+make test-agent-guard                   # 33 checks; temporarily widens the agent's RBAC
 ./scripts/new-approver.sh alice         # writes ~/.kube/safe-ops-approver-alice.kubeconfig
 export KUBECONFIG=~/.kube/safe-ops-approver-alice.kubeconfig
 projects/02-approval-gate/bin/approvalctl list
