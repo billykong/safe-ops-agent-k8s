@@ -1,0 +1,9 @@
+# temporal: the workflow engine holding the agent's state across long
+# approvals (P2-30). Trusted, like the approval controller.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: temporal
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

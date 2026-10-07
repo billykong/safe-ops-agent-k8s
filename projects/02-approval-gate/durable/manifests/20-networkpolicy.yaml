@@ -1,0 +1,29 @@
+# Temporal's frontend has no authentication in this setup (GAP-03): whoever
+# can reach 7233 can start, signal, terminate or read any workflow. So only
+# the agent's worker pods may connect, and the server talks to nothing.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: temporal
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-from-agent-worker
+  namespace: temporal
+spec:
+  podSelector:
+    matchLabels: {app: temporal}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: agent}
+      podSelector:
+        matchLabels: {app: agent-worker}
+    ports:
+    - {port: 7233, protocol: TCP}

@@ -27,7 +27,7 @@ Reference documents (read 2026-09-29):
 
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
-| SEC-01 | The agent loop and the code sandbox run in **separate pods**. The sandbox has no credentials, no GPU, and no route to the agent, gateways, workflow engine or API server. | Must | **Done**: `make verify`, `make test-executor` |
+| SEC-01 | The agent loop and the code sandbox run in **separate pods**. The sandbox has no credentials, no GPU, and no route to the agent, gateways, workflow engine or API server. | Must | **Done**: `make verify`, `make test-executor`; no route to the workflow engine: `make test-durable` |
 | SEC-02 | DNS is treated as an exfiltration channel. The sandbox has no egress by default. Where egress is needed, only allowlisted names can be *resolved* (Cilium L7 DNS), ICMP is blocked, and allowlists are minimal. | Must | **Done**: no egress, DNS exfiltration and ICMP blocked (`make attack-demos`); DNS-scoped egress with exact names for tasks that need it (`make test-egress`). Domain fronting remains: see residual risks |
 | SEC-03 | The agent never holds the model API key or tool secrets. Gateways hold them and authenticate the agent by workload identity. | Must | Planned (P3) |
 | SEC-04 | The agent cannot approve its own change: approval is in the status subresource; the agent has no `update` on `changerequests/status`; the approver is recorded from the authenticated request identity; approval needs an authenticated human. | Must | **Done**: `make test-approval` (RBAC, plus admission policies that stamp the authenticated approver and require a human in `safe-ops:approvers`) |
@@ -41,7 +41,7 @@ Reference documents (read 2026-09-29):
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
 | SEC-10 | Guardrail webhooks fail closed (`failurePolicy: Fail`) for the agent's identity, scoped with `matchConditions` so an outage blocks the agent, not the cluster. | Must | **Partial**: set on the claim policy (built-in VAP, no webhook to fail); webhook outage test planned (P2) |
-| SEC-11 | The kill switch flips a flag checked by a fail-closed webhook, **and** revokes the agent's credentials, cancels in-flight workflows, and scales the agent to zero. It is tested as part of the evals. | Must | **Done** in P2 as a ValidatingAdmissionPolicy (no webhook to fail) plus `scripts/kill-switch.sh`: `make test-kill-switch`. Joins the eval suite in P4 |
+| SEC-11 | The kill switch flips a flag checked by a fail-closed webhook, **and** revokes the agent's credentials, cancels in-flight workflows, and scales the agent to zero. It is tested as part of the evals. | Must | **Done** in P2 as a ValidatingAdmissionPolicy (no webhook to fail) plus `scripts/kill-switch.sh`, which also terminates in-flight Temporal workflows: `make test-kill-switch`, `make test-durable`. Joins the eval suite in P4 |
 | SEC-12 | If the model API is down, the system degrades to "escalate everything", never to "act without the model's checks". | Should | Planned (P3) |
 
 ### Human oversight

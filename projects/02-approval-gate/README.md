@@ -10,7 +10,7 @@ Requirements and status: [docs/prd/projects/p2-approval-gate.md](../../docs/prd/
 2. [x] Approval CLI (`approvalctl`) with authenticated approver identity; hash binding and expiry. `make p2 test-approval`: 58 checks
 3. [x] Admission guard rejecting direct writes by the agent's identity (a ValidatingAdmissionPolicy). `make test-agent-guard`: 33 checks
 4. [x] Change budget and kill switch, with a runbook. `make test-budget`: 33 checks; `make test-kill-switch`: 46 checks
-5. [ ] Durable execution across long approvals
+5. [x] Durable execution across long approvals, with Temporal; pod-restart demo. `make durable test-durable`: 40 checks
 6. [ ] Deterministic approval packet and oversight metrics
 
 ## How it works
@@ -57,6 +57,13 @@ sequenceDiagram
   - a ValidatingAdmissionPolicy, with the ConfigMap as its parameter, refuses the agent's new claims and proposals, and any new pod or token in the `agent` namespace, from anyone. A Job that's un-suspended can't bring the agent back;
   - the controller cancels every request that hasn't started applying (`Cancelled`), whoever approved it, and applies nothing more. It watches the flag (caching only that one ConfigMap) and treats missing or unreadable as stopped.
   `make p2` creates the flag only if it's missing, so re-deploying never resumes a stopped agent.
+- **Durable execution** (`durable/`). The agent runs as a Temporal worker (`durable/agent/`, Deployment `agent-worker`, as the agent's service account), and each task it's given is a `ChangeWorkflow`:
+  1. `propose` creates the ChangeRequest, named after the task and annotated with the workflow ID. If it already exists from an earlier attempt of the same workflow (a crash after creating it), it's adopted; if anyone else's, the workflow fails rather than act on it.
+  2. `await_decision` polls the ChangeRequest for a few minutes, heartbeating every poll, and reports back. The workflow repeats it until the request is final (Applied, Rejected, Failed, Expired, Cancelled), and returns the outcome and who decided.
+  - The workflow code does no I/O, so Temporal replays it on any worker. A worker that dies mid-poll misses a heartbeat, and the poll is rescheduled within 20 s. With no worker at all, the workflow simply waits in Temporal, for as long as the ChangeRequest's own expiry allows.
+  - A long wait doesn't grow without bound: the workflow continues as new when Temporal suggests it (or after `polls_per_run` polls), carrying its progress, so the proposal is never repeated.
+  - Temporal is the single-binary dev server with SQLite on a volume (`durable/manifests/10-temporal.yaml`). Only the worker can reach its frontend, which has no authentication ([GAP-03](../../docs/known-gaps.md#gap-03-temporals-frontend-has-no-authentication)). The worker's egress is the API server, one DNS name and Temporal; not the sandboxes.
+  - The kill switch terminates every running workflow, then scales the worker to zero with the rest of the agent.
 - **The controller's reach** (`config/rbac/role.yaml`, generated from markers): read ChangeRequests and ChangeBudgets and write their status; `get`/`patch` Deployments in `workloads` only; read ConfigMaps in its own namespace (the flag). No create/delete, no pods, no other namespaces. Default-deny network policy with egress to the API server only.
 
 ## Findings
@@ -76,12 +83,17 @@ sequenceDiagram
 13. **Which policy reports a denial isn't stable.** After the policies were re-applied, a status write by the agent's identity was refused by `agent-write-guard` rather than the approval policy, failing a test that expected the latter's message. Both refusals were correct. The check now uses a different service account, so it tests the approval policy alone.
 14. **The budget is consulted once.** A request that wasn't eligible or found the budget spent keeps waiting for a human, even after the window frees budget, so nothing changes under an approver who's reviewing it. The controller runs one worker, so concurrent proposals are paid for one at a time; the precondition on the budget's `resourceVersion` is what keeps more workers or replicas from overspending.
 
+15. **Kubelet probes arrive as `world` under this Cilium setup.** Temporal's `tcpSocket` readiness probe timed out: Cilium's drop log showed the SYNs from the host's address (`10.244.0.1`) classed as `world`, and the namespace's default-deny ingress dropped them. Nothing earlier had a network probe behind a default-deny ingress (P1's sandboxes use exec probes). Temporal now has an exec probe.
+16. **Blocked DNS stalled a server that needs no DNS.** Temporal talks to itself on localhost, but its gRPC clients still look up TXT and SRV records for `localhost` through every search domain. With egress denied, the queries were dropped, each internal call waited out the resolver timeout, and the server never became healthy. Pointing its resolver at `127.0.0.1` (nothing listens) with no search domains makes them fail at once. Cilium's drop log showed the queries; a temporary DNS-proxy policy with `matchPattern: "*"` named them.
+17. **A second, optional workflow parameter turned the first into a dict.** The Temporal Python SDK ignores a workflow's parameter types when the number of inputs differs from the number of parameters, so `run(task, progress=None)` started with one input received `task` as a plain dict. The workflow takes one dataclass, and the continue-as-new progress is a field in it.
+18. **The worker ignored SIGTERM while connecting.** Its handler was installed after `Client.connect`, which retries while Temporal is down; as PID 1 it ignored SIGTERM and hung in `Terminating`. The P1 finding again, in a new place. The handler now goes first, and stopping cancels the connect.
+19. **The kill switch stopped halfway when a workflow raced it.** One finished between being listed and being terminated; the error aborted the script under `set -e`, so the worker was never scaled down. The workflow step now reports failures and never aborts, and the test caught it because it checks every layer after a stop, not just the step it added.
+
 ## Not yet (next milestones)
-- No durable execution: an agent waiting on approval holds no workflow state across restarts (milestone 5).
 - The review packet has no server-side dry run, policy findings or tested rollback yet (milestone 6).
 
 ## Layout
-Kubebuilder layout, trimmed to what's used: `api/` (types), `internal/controller/` (reconciler and its pure decision functions, unit-tested in `logic_test.go`), `config/crd/bases/` and `config/rbac/role.yaml` (generated by `make manifests`), `manifests/` (hand-written deployment: namespaces, bindings, controller, agent role, network policy, demo workload). Kustomize overlays aren't used: their namespace rewrite would move the controller's `workloads` Role into its own namespace.
+Kubebuilder layout, trimmed to what's used: `api/` (types), `internal/controller/` (reconciler and its pure decision functions, unit-tested in `logic_test.go`), `config/crd/bases/` and `config/rbac/role.yaml` (generated by `make manifests`), `manifests/` (hand-written deployment: namespaces, bindings, controller, agent role, network policy, demo workload). Kustomize overlays aren't used: their namespace rewrite would move the controller's `workloads` Role into its own namespace. `durable/` holds milestone 5: the agent worker (`agent/`: workflow, activities, worker; Python, `temporalio`) and its manifests (Temporal, network policy, worker Deployment), deployed by `make durable`, separate from `make p2`.
 
 The controller binary is built on the host (`make build`; Go from `scripts/setup-go.sh`) and copied into a distroless image, rather than compiled inside a large Go builder image.
 
@@ -93,6 +105,8 @@ make test-approval                      # 58 checks
 make test-agent-guard                   # 33 checks; temporarily widens the agent's RBAC
 make test-budget                        # 33 checks; creates and removes a ChangeBudget
 make test-kill-switch                   # 46 checks; stops a running agent, resumes, leaves mode=run
+make durable                            # Temporal and the agent worker
+make test-durable                       # 40 checks; restarts both mid-approval
 ./scripts/kill-switch.sh status         # stop --reason TEXT | resume --reason TEXT
 ./scripts/new-approver.sh alice         # writes ~/.kube/safe-ops-approver-alice.kubeconfig
 export KUBECONFIG=~/.kube/safe-ops-approver-alice.kubeconfig

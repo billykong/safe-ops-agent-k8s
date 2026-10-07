@@ -1,0 +1,78 @@
+# The agent as a long-running Temporal worker (P2-30), as the agent's
+# service account: the same RBAC, write guard and kill switch as the agent
+# Job. It holds no state; the workflow history in Temporal does.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-worker
+  namespace: agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: agent-worker}
+  template:
+    metadata:
+      labels: {app: agent-worker}
+    spec:
+      serviceAccountName: agent
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile: {type: RuntimeDefault}
+      # Cilium's DNS proxy answers only the Temporal name for this pod;
+      # with the default ndots:5, the resolver would try search-domain
+      # variants first and be refused (P1 finding).
+      dnsConfig:
+        options: [{name: ndots, value: "1"}]
+      containers:
+      - name: worker
+        image: approval-agent:dev
+        imagePullPolicy: Never
+        env:
+        - {name: TEMPORAL_ADDRESS, value: "temporal.temporal.svc.cluster.local:7233"}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        resources:
+          requests: {cpu: 50m, memory: 128Mi}
+          limits: {cpu: 500m, memory: 256Mi}
+        volumeMounts:
+        - {name: tmp, mountPath: /tmp}
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+# The worker reaches the API server, one DNS name, and Temporal's frontend.
+# Not the sandboxes: the agent Job runs code there, the worker doesn't.
+# Everything else stays denied by the agent namespace's default-deny.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agent-worker-egress
+  namespace: agent
+spec:
+  endpointSelector:
+    matchLabels: {app: agent-worker}
+  egress:
+  - toEntities: [kube-apiserver]
+    toPorts:
+    - ports: [{port: "6443", protocol: TCP}]
+  - toEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: kube-system
+        k8s:k8s-app: kube-dns
+    toPorts:
+    - ports:
+      - {port: "53", protocol: UDP}
+      - {port: "53", protocol: TCP}
+      rules:
+        dns:
+        - matchName: temporal.temporal.svc.cluster.local
+  - toEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: temporal
+        app: temporal
+    toPorts:
+    - ports: [{port: "7233", protocol: TCP}]
