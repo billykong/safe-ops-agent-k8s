@@ -22,6 +22,9 @@ check() { if grep -qE -- "$2" <<<"$3"; then pass "$1"; else fail "$1: got: ${3:0
 [ -x $CLI ] || { echo "build the CLI first: make p2"; exit 1; }
 
 replicas() { kubectl get deploy -n workloads web -o jsonpath='{.spec.replicas}'; }
+# The review rules flag a target mid-rollout or not fully ready, and the
+# budget doesn't pay for flagged changes: let web settle first.
+settle() { kubectl rollout status deploy/web -n workloads --timeout=120s >/dev/null; }
 st() { kubectl get changerequest -n $NS "$1" -o jsonpath="$2"; }
 phase() { st "$1" '{.status.phase}'; }
 wait_phase() { for _ in $(seq 1 30); do grep -qE "^($2)$" <<<"$(phase "$1")" && return 0; sleep 1; done; return 1; }
@@ -87,6 +90,10 @@ wait_phase big-$T Pending && check "scale to 9 (outside 1-3): waits for a human"
   || fail "scale to 9: $(phase big-$T)"
 propose zero-$T ScaleDeployment 0
 wait_phase zero-$T Pending && check "scale to 0: waits for a human" 'not covered.*scaling to 0' "$(st zero-$T '{.status.message}')" || fail "scale to 0: $(phase zero-$T)"
+propose flag-$T ScaleDeployment 3
+wait_phase flag-$T Pending && check "1 -> 3 (in range, but more than doubles): flagged, so waits for a human" 'review findings \[LargeScaleUp\]' "$(st flag-$T '{.status.message}')" \
+  || fail "flagged change: $(phase flag-$T)"
+settle
 propose auto1-$T ScaleDeployment 2
 wait_phase auto1-$T Applied && pass "scale to 2: Applied with no approval" || fail "scale to 2: $(phase auto1-$T) $(st auto1-$T '{.status.message}')"
 [ "$(replicas)" = 2 ] && pass "web scaled to 2" || fail "web has $(replicas) replicas"
@@ -97,10 +104,12 @@ wait_phase auto1-$T Applied && pass "scale to 2: Applied with no approval" || fa
 [ -n "$(st auto1-$T '{.status.plan}')" ] && [ -n "$(st auto1-$T '{.status.rollbackPlan}')" ] \
   && pass "plan and rollback still recorded before applying (P2-05)" || fail "plan or rollback missing"
 check "message says who approved" 'applied \(approved by change budget default\)' "$(st auto1-$T '{.status.message}')"
+settle
 propose auto2-$T RestartDeployment
 wait_phase auto2-$T Applied && pass "restart: Applied with no approval (2 of 2)" || fail "restart: $(phase auto2-$T) $(st auto2-$T '{.status.message}')"
 
 echo "--- budget spent: the agent must ask"
+settle
 propose over-$T ScaleDeployment 3
 wait_phase over-$T Pending && check "third change: Pending, budget spent" 'change budget default is spent \(2 of 2' "$(st over-$T '{.status.message}')" \
   || fail "third change: $(phase over-$T) $(st over-$T '{.status.message}')"
@@ -119,7 +128,8 @@ budget 2 10
 sleep 11
 out=$(actl budget)
 check "after the window: 2 of 2 remaining" 'remaining +2 of 2' "$out"
-propose later-$T ScaleDeployment 1
+settle
+propose later-$T ScaleDeployment 2
 wait_phase later-$T Applied && pass "change after the window: Applied with no approval" || fail "after window: $(phase later-$T) $(st later-$T '{.status.message}')"
 [ "$(kubectl get changebudget -n $NS default -o jsonpath='{.status.grants[*].changeRequest}')" = "later-$T" ] \
   && pass "expired grants pruned" || fail "grants: $(kubectl get changebudget -n $NS default -o jsonpath='{.status.grants}')"
@@ -129,6 +139,7 @@ wait_phase later-$T Applied && pass "change after the window: Applied with no ap
 echo "--- concurrent proposals can't overspend"
 budget 1 3600
 kubectl patch changebudget -n $NS default --subresource=status --type=merge -p '{"status":{"grants":null}}' >/dev/null
+settle
 for i in 1 2 3 4; do propose race$i-$T RestartDeployment & done; wait
 sleep 3; for i in 1 2 3 4; do wait_phase race$i-$T 'Applied|Pending' || true; done
 applied=0; for i in 1 2 3 4; do [ "$(phase race$i-$T)" = Applied ] && applied=$((applied+1)); done

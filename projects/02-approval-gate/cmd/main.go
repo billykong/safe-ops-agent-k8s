@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
@@ -19,12 +20,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	approvalv1alpha1 "github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/api/v1alpha1"
 	"github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/internal/controller"
+	"github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/internal/oversight"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -187,6 +190,14 @@ func main() {
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
+
+	// Oversight metrics (P2-42), recomputed from the ChangeRequests on each
+	// scrape.
+	metrics.Registry.MustRegister(oversight.NewCollector(func(ctx context.Context) ([]approvalv1alpha1.ChangeRequest, error) {
+		var l approvalv1alpha1.ChangeRequestList
+		err := mgr.GetClient().List(ctx, &l)
+		return l.Items, err
+	}))
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "Failed to set up health check")

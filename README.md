@@ -33,6 +33,7 @@ make test-agent-guard          # admission backstop on the agent's writes (widen
 make test-budget               # change budget: N autonomous changes, then a human
 make test-kill-switch          # stop the agent mid-task, check every layer, resume
 make durable test-durable      # Temporal; the agent as a worker; restarts mid-approval lose nothing
+make test-review               # computed review packet, Critical-finding override, oversight metrics
 ./scripts/kill-switch.sh stop --reason TEXT   # runbook: docs/runbooks/kill-switch.md
 ./scripts/new-approver.sh NAME # issue an approver certificate; then approvalctl with that kubeconfig
 ```

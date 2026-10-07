@@ -49,7 +49,7 @@ Reference documents (read 2026-09-29):
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
 | SEC-20 | The approval view leads with a deterministic diff, blast radius and policy findings. The model's rationale is secondary and labelled as model-generated. | Must | Planned (P2) |
-| SEC-21 | Oversight is measured: approval rate, time to approve, override/reject counts, and catch rate on seeded known-bad proposals. | Should | Planned (P2, P4) |
+| SEC-21 | Oversight is measured: approval rate, time to approve, override/reject counts, and catch rate on seeded known-bad proposals. | Should | **Partial**: approval rate, time to decide, rejections and approvals of flagged requests per approver (`approvalctl stats`, controller metrics; `make test-review`). Seeded known-bad proposals in P4 |
 | SEC-22 | Agent-written runbooks, memory and summaries are untrusted until merged through human-reviewed PRs with provenance. | Should | Planned |
 
 ### Supply chain and platform hardening
@@ -75,7 +75,7 @@ To be kept under `docs/` as the projects land.
 | --- | --- | --- |
 | Threat model mapping each OWASP ASI risk to a control or an accepted residual risk | MAP 4, MANAGE 1.3-1.4 | Summary above; full version planned |
 | Inventory / AI-BOM of models, prompts, tools and MCP servers | GOVERN 1.6, MAP 4.2 | Planned (P3) |
-| Human oversight design: what needs approval, who approves, oversight metrics | MAP 3.5, GOVERN 3.2, MEASURE 2.8 | Planned (P2) |
+| Human oversight design: what needs approval, who approves, oversight metrics | MAP 3.5, GOVERN 3.2, MEASURE 2.8 | **Done** (P2): everything needs approval except what the change budget pays for; approvers are certificate-authenticated members of `safe-ops:approvers`; packet and metrics computed by code (`make test-review`) |
 | Kill-switch / deactivation and decommission runbook, tested | MANAGE 2.4, GOVERN 1.7 | **Done**: `docs/runbooks/kill-switch.md`, `make test-kill-switch` |
 | Red-team plan, cadence and results log | MEASURE 2.7, MANAGE 4.1 | Planned (P1 M4, P3) |
 | Incident / near-miss log and change log | MANAGE 4.3, GOVERN 4.3 | Partial: P1 findings log |

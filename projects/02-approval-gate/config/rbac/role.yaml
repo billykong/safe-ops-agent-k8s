@@ -51,3 +51,9 @@ rules:
   verbs:
   - get
   - patch
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
+  verbs:
+  - list

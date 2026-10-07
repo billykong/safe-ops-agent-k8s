@@ -293,6 +293,11 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              decidedAt:
+                description: 'decidedAt: when the controller saw the request reach
+                  a final phase.'
+                format: date-time
+                type: string
               expiresAt:
                 description: |-
                   expiresAt: approvals arriving after this (by the controller's clock)
@@ -338,6 +343,128 @@ spec:
                 required:
                 - generation
                 - replicas
+                type: object
+              proposals:
+                description: |-
+                  proposals: how many times the plan was computed; more than one means
+                  it was re-proposed after drift.
+                format: int32
+                type: integer
+              proposedAt:
+                description: |-
+                  proposedAt: when the request was first proposed (not reset by
+                  re-proposals). With decidedAt, the basis of the oversight metrics.
+                format: date-time
+                type: string
+              review:
+                description: 'review: the computed review packet for the current plan.'
+                properties:
+                  blastRadius:
+                    description: |-
+                      ComputedBlastRadius is what the change does to the target's pods,
+                      computed from the live object, not taken from the proposer.
+                    properties:
+                      disruptionBudgets:
+                        description: 'disruptionBudgets: PodDisruptionBudgets selecting
+                          the target''s pods.'
+                        items:
+                          type: string
+                        type: array
+                      maxUnavailable:
+                        description: |-
+                          maxUnavailable: how many pods a rollout may take down at once,
+                          resolved against the replica count.
+                        format: int32
+                        type: integer
+                      podsAdded:
+                        format: int32
+                        type: integer
+                      podsRemoved:
+                        format: int32
+                        type: integer
+                      podsReplaced:
+                        description: 'podsReplaced: pods recreated by a rollout.'
+                        format: int32
+                        type: integer
+                      readyBefore:
+                        format: int32
+                        type: integer
+                      replicasAfter:
+                        format: int32
+                        type: integer
+                      replicasBefore:
+                        format: int32
+                        type: integer
+                      summary:
+                        type: string
+                    required:
+                    - maxUnavailable
+                    - podsAdded
+                    - podsRemoved
+                    - podsReplaced
+                    - readyBefore
+                    - replicasAfter
+                    - replicasBefore
+                    - summary
+                    type: object
+                  diff:
+                    description: |-
+                      diff: every field the plan changes, from a server-side dry run of
+                      the exact patch, so defaulting and admission are accounted for.
+                    items:
+                      description: FieldChange is one field the plan changes, from
+                        the server's own dry run.
+                      properties:
+                        from:
+                          description: 'from and to: JSON values; empty when the field
+                            is absent.'
+                          type: string
+                        path:
+                          description: 'path: dotted path, e.g. spec.replicas.'
+                          type: string
+                        to:
+                          type: string
+                      required:
+                      - path
+                      type: object
+                    type: array
+                  dryRun:
+                    description: 'dryRun: "accepted", or "refused: <the API server''s
+                      reason>".'
+                    type: string
+                  findings:
+                    items:
+                      description: Finding is a deterministic rule's verdict on the
+                        plan (P2-40).
+                      properties:
+                        code:
+                          description: 'code: a stable identifier, e.g. ScaleToZero,
+                            BelowDisruptionBudget.'
+                          type: string
+                        message:
+                          type: string
+                        severity:
+                          description: Severity of a finding.
+                          enum:
+                          - Info
+                          - Warning
+                          - Critical
+                          type: string
+                      required:
+                      - code
+                      - message
+                      - severity
+                      type: object
+                    type: array
+                  rollbackCheck:
+                    description: |-
+                      rollbackCheck: whether the rollback plan, applied to the dry run's
+                      result, restores the reviewed pre-state exactly.
+                    type: string
+                required:
+                - blastRadius
+                - dryRun
+                - rollbackCheck
                 type: object
               reviewHash:
                 description: |-
