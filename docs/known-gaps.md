@@ -5,6 +5,7 @@ Weaknesses we know about, have reproduced, and haven't closed yet. Each has an I
 | ID | Gap | Severity | Status | Requirement |
 | --- | --- | --- | --- | --- |
 | [GAP-01](#gap-01-domain-fronting-through-the-pypi-egress-allowlist) | Domain fronting through the PyPI egress allowlist | High for sandboxes with egress; none for default sandboxes | Open | [P1-13](prd/projects/p1-sandboxed-code-exec.md) |
+| [GAP-02](#gap-02-admission-guards-cant-protect-their-own-configuration) | Admission guards can't protect their own configuration | Low today (the agent has no such RBAC); critical if that RBAC is ever granted | Open (inherent; mitigated by RBAC tests) | [P2-13, P2-14](prd/projects/p2-approval-gate.md) |
 
 ## GAP-01: domain fronting through the PyPI egress allowlist
 
@@ -51,3 +52,35 @@ Without the SNI pin, even plain HTTPS by name to those sites worked through PyPI
 ### Status
 
 Open.
+
+## GAP-02: admission guards can't protect their own configuration
+
+**Found:** 2026-10-07, P2 milestone 3. **Reproduced by:** `make test-agent-guard`, reported as `GAP GAP-02`.
+
+### What's wrong
+
+`agent-write-guard` (`projects/02-approval-gate/manifests/80-agent-write-guard.yaml`) refuses every write by the agent's identity outside a small allowlist, even when RBAC would allow it. But Kubernetes never applies admission policies or webhooks to admission configuration itself: `ValidatingAdmissionPolicy`, `MutatingAdmissionPolicy`, their bindings, and webhook configurations. This avoids configurations that lock everyone out. So an agent whose RBAC were widened to cover `admissionregistration.k8s.io` could delete the guard, then do what the guard was there to stop. The approval-integrity policies of P2 milestone 2 are equally exposed.
+
+Two related permissions are invisible to any admission check: `impersonate`, since a request made while impersonating is admitted as the impersonated user, and `escalate`/`bind` on RBAC.
+
+### Evidence
+
+With RBAC temporarily widened to write almost anything (not impersonate/escalate/bind), the guard refused patching workloads, scaling, deleting a namespace, creating pods and secrets, exec, editing the controller, cordoning the node, and removing the widening itself. A server-side dry run of deleting `agent-write-guard` was admitted.
+
+### Impact
+
+None while the agent has no RBAC on admission configuration, impersonation, escalate or bind. That is checked by `make test-agent-guard` and `make test-approval`. If someone ever grants it, the backstop and the approval-integrity policies can be removed by the agent.
+
+### Options
+
+| Option | Closes it? | Cost |
+| --- | --- | --- |
+| Keep those permissions away from the agent, and test it on every run | Keeps it closed in practice | Already done; relies on RBAC hygiene |
+| Alert on changes to admission configuration (API audit log to an agent-unwritable store, P4) | Detects, doesn't prevent | Audit pipeline |
+| Manage admission configuration with GitOps reconciliation (re-applied within minutes) | Shrinks the window | A reconciler with its own privileges |
+| Out-of-cluster enforcement (e.g. an API proxy in front of the agent) | Yes, for the agent's traffic | Another component in the agent's path |
+
+### Status
+
+Open, inherent to in-cluster admission control. Mitigated by keeping and testing the RBAC exclusions.
+

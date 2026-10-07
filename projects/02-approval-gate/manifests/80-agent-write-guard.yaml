@@ -1,0 +1,65 @@
+# Backstop for the agent's RBAC (P2-13): whatever RBAC grants, the agent's
+# identity may write only what its job needs. Every other create, update,
+# delete or connect by system:serviceaccount:agent:agent is refused at
+# admission, fail-closed. Other identities (humans, the approval
+# controller) are not matched at all.
+#
+# A ValidatingAdmissionPolicy, not a webhook: the API server evaluates it
+# in-process, so there's no TLS, no extra service to keep running, and no
+# "webhook down, cluster blocked" failure mode. Same admission point,
+# same fail-closed behaviour.
+#
+# Limits (docs/known-gaps.md GAP-02): admission policies and webhooks are
+# never applied to admission configuration itself, so an agent given RBAC on
+# admissionregistration.k8s.io could delete this guard. Impersonation, and
+# escalate/bind on RBAC, aren't writes this can see either. The agent must
+# never hold those permissions; make test-agent-guard checks it doesn't.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-write-guard
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["*"]
+      apiVersions: ["*"]
+      # "*/*" covers every resource and every subresource (status, exec, ...).
+      resources: ["*/*"]
+      operations: ["CREATE", "UPDATE", "DELETE", "CONNECT"]
+  matchConditions:
+  - name: agent-identity
+    expression: request.userInfo.username == "system:serviceaccount:agent:agent"
+  variables:
+  # Fields that are empty in a request (subResource, namespace) are absent,
+  # not "": reading them directly raises "no such key", which fail-closed
+  # turns into denying everything, including the allowed writes below.
+  - name: sub
+    expression: request.?subResource.orValue("")
+  - name: ns
+    expression: request.?namespace.orValue("")
+  - name: target
+    expression: >-
+      request.resource.resource + (variables.sub != "" ? "/" + variables.sub : "") +
+      (variables.ns != "" ? " in " + variables.ns : "")
+  - name: allowed
+    expression: >-
+      (request.resource.group == "extensions.agents.x-k8s.io" && request.resource.resource == "sandboxclaims" &&
+       variables.sub == "" && variables.ns == "sandboxes" && request.operation in ["CREATE", "DELETE"]) ||
+      (request.resource.group == "approval.safe-ops.io" && request.resource.resource == "changerequests" &&
+       variables.sub == "" && variables.ns == "approvals" && request.operation == "CREATE") ||
+      (request.resource.group == "authorization.k8s.io" && request.resource.resource in ["selfsubjectaccessreviews", "selfsubjectrulesreviews"]) ||
+      (request.resource.group == "authentication.k8s.io" && request.resource.resource == "selfsubjectreviews")
+  validations:
+  - expression: variables.allowed
+    messageExpression: >-
+      "agent-write-guard: the agent may not " + request.operation + " " + variables.target +
+      "; changes to the cluster go through a ChangeRequest"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-write-guard
+spec:
+  policyName: agent-write-guard
+  validationActions: [Deny]

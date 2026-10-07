@@ -29,6 +29,7 @@ make test-egress               # DNS-scoped egress for the pypi sandbox pool
 make kata verify-kata          # optional: Kata Containers sandboxes (nested KVM)
 ./scripts/setup-go.sh          # once, no sudo: Go for the P2 controller
 make p2 test-approval          # approval gate: propose, approve, apply
+make test-agent-guard          # admission backstop on the agent's writes (widens its RBAC to test)
 ./scripts/new-approver.sh NAME # issue an approver certificate; then approvalctl with that kubeconfig
 ```
 
