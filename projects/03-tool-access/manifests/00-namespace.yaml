@@ -1,0 +1,10 @@
+# gateways: what stands between the agents and models and tools (P3). The
+# gateways hold the secrets; the agents hold none and authenticate with
+# their workload identity.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gateways
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

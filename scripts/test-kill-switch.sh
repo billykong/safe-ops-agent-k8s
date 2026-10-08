@@ -10,7 +10,8 @@
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 cd "$(dirname "$0")/.."
-AGENT=system:serviceaccount:agent:agent
+AGENT=system:serviceaccount:agent:proposer   # proposes ChangeRequests
+RUNNER=system:serviceaccount:agent:runner    # claims sandboxes
 CTRL=system:serviceaccount:approval-system:approval-controller
 CLI=projects/02-approval-gate/bin/approvalctl
 NS=approvals
@@ -111,11 +112,12 @@ done
 cr pending-$T ScaleDeployment 2 | kubectl create --as=$AGENT -f - >/dev/null
 wait_phase pending-$T Pending && pass "agent's proposal pending-$T is Pending" || fail "pending-$T: $(phase pending-$T)"
 kubectl apply -f projects/02-approval-gate/examples/change-budget.yaml >/dev/null
-STOLEN=$(kubectl create token agent -n agent --duration=1h)
+STOLEN=$(kubectl create token proposer -n agent --duration=1h)
 token_kubeconfig "$STOLEN" $TMP/stolen.kubeconfig
 out=$(with_token $TMP/stolen.kubeconfig get changerequests -n $NS -o name)
 check "stolen token works before the switch (reads proposals)" "pending-$T" "$out"
-OLD_UID=$(kubectl get sa -n agent agent -o jsonpath='{.metadata.uid}')
+OLD_UID=$(kubectl get sa -n agent proposer -o jsonpath='{.metadata.uid}')
+OLD_RUNNER_UID=$(kubectl get sa -n agent runner -o jsonpath='{.metadata.uid}')
 
 echo "--- one action: kill-switch.sh stop"
 out=$(./scripts/kill-switch.sh stop --reason "test-kill-switch $T" 2>&1) || fail "kill-switch.sh stop failed: $out"
@@ -126,9 +128,9 @@ grep -q "test-kill-switch $T" <<<"$(kubectl get configmap -n approval-system age
 
 echo "--- admission: the agent can't act"
 killed "agent can't propose a change" "$(cr probe-$T RestartDeployment | kubectl create --as=$AGENT --dry-run=server -f - 2>&1 || true)"
-killed "agent can't claim a sandbox" "$(claim | kubectl create --as=$AGENT --dry-run=server -f - 2>&1 || true)"
+killed "agent can't claim a sandbox" "$(claim | kubectl create --as=$RUNNER --dry-run=server -f - 2>&1 || true)"
 killed "nobody can start a pod in the agent namespace (cluster admin tried)" "$(pod | kubectl create --dry-run=server -f - 2>&1 || true)"
-killed "nobody can mint a token for the agent (cluster admin tried)" "$(kubectl create token agent -n agent 2>&1 || true)"
+killed "nobody can mint a token for the agent (cluster admin tried)" "$(kubectl create token proposer -n agent 2>&1 || true)"
 out=$(pod sandboxes | kubectl create --dry-run=server -f - 2>&1 || true)
 grep -q 'agent-kill-switch' <<<"$out" && fail "pods outside the agent namespace blocked: $out" || pass "pods elsewhere unaffected (sandboxes)"
 out=$(cr human-$T RestartDeployment | kubectl create -f - 2>&1 || true)
@@ -147,8 +149,10 @@ ev=$(kubectl get events -n agent --field-selector involvedObject.name=$JOB,reaso
 kubectl patch job -n agent $JOB --type=merge -p '{"spec":{"suspend":true}}' >/dev/null
 
 echo "--- credentials revoked, reads included"
-NEW_UID=$(kubectl get sa -n agent agent -o jsonpath='{.metadata.uid}')
-[ -n "$NEW_UID" ] && [ "$NEW_UID" != "$OLD_UID" ] && pass "agent ServiceAccount recreated (new uid)" || fail "SA uid $OLD_UID -> $NEW_UID"
+NEW_UID=$(kubectl get sa -n agent proposer -o jsonpath='{.metadata.uid}')
+[ -n "$NEW_UID" ] && [ "$NEW_UID" != "$OLD_UID" ] && pass "proposer ServiceAccount recreated (new uid)" || fail "SA uid $OLD_UID -> $NEW_UID"
+NEW_RUNNER_UID=$(kubectl get sa -n agent runner -o jsonpath='{.metadata.uid}')
+[ -n "$NEW_RUNNER_UID" ] && [ "$NEW_RUNNER_UID" != "$OLD_RUNNER_UID" ] && pass "runner ServiceAccount recreated too (every agent identity)" || fail "runner uid $OLD_RUNNER_UID -> $NEW_RUNNER_UID"
 out=$(with_token $TMP/stolen.kubeconfig get changerequests -n $NS -o name)
 check "stolen token refused, even for reads" 'Unauthorized|must be logged in' "$out"
 
@@ -184,9 +188,9 @@ out=$(./scripts/kill-switch.sh resume --reason "test-kill-switch $T resume" 2>&1
 [ "$(mode)" = run ] && pass "flag says run" || fail "flag: $(mode)"
 out=$(cr probe-$T RestartDeployment | kubectl create --as=$AGENT --dry-run=server -f - 2>&1 || true)
 check "agent can propose again" 'created \(server dry run\)' "$out"
-out=$(claim | kubectl create --as=$AGENT --dry-run=server -f - 2>&1 || true)
+out=$(claim | kubectl create --as=$RUNNER --dry-run=server -f - 2>&1 || true)
 check "agent can claim a sandbox again" 'created \(server dry run\)' "$out"
-NEWTOK=$(kubectl create token agent -n agent --duration=10m 2>&1 || true)
+NEWTOK=$(kubectl create token proposer -n agent --duration=10m 2>&1 || true)
 token_kubeconfig "$NEWTOK" $TMP/new.kubeconfig
 check "a new token works" "changerequest" "$(with_token $TMP/new.kubeconfig get changerequests -n $NS -o name)"
 check "the stolen token stays dead" 'Unauthorized|must be logged in' "$(with_token $TMP/stolen.kubeconfig get changerequests -n $NS -o name)"

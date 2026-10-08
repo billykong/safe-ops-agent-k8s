@@ -1,8 +1,11 @@
-# Backstop for the agent's RBAC (P2-13): whatever RBAC grants, the agent's
-# identity may write only what its job needs. Every other create, update,
-# delete or connect by system:serviceaccount:agent:agent is refused at
-# admission, fail-closed. Other identities (humans, the approval
-# controller) are not matched at all.
+# Backstop for the agents' RBAC (P2-13): whatever RBAC grants, each agent
+# identity may write only what its own job needs. Every other create,
+# update, delete or connect by a service account in the agent namespace
+# (group system:serviceaccounts:agent) is refused at admission, fail-closed:
+# - runner: create and delete SandboxClaims in sandboxes;
+# - proposer: create ChangeRequests in approvals;
+# - any of them, including identities added later: self-review calls only.
+# Other identities (humans, the approval controller) are not matched.
 #
 # A ValidatingAdmissionPolicy, not a webhook: the API server evaluates it
 # in-process, so there's no TLS, no extra service to keep running, and no
@@ -28,8 +31,8 @@ spec:
       resources: ["*/*"]
       operations: ["CREATE", "UPDATE", "DELETE", "CONNECT"]
   matchConditions:
-  - name: agent-identity
-    expression: request.userInfo.username == "system:serviceaccount:agent:agent"
+  - name: agent-identities
+    expression: '"system:serviceaccounts:agent" in request.userInfo.groups'
   variables:
   # Fields that are empty in a request (subResource, namespace) are absent,
   # not "": reading them directly raises "no such key", which fail-closed
@@ -42,18 +45,22 @@ spec:
     expression: >-
       request.resource.resource + (variables.sub != "" ? "/" + variables.sub : "") +
       (variables.ns != "" ? " in " + variables.ns : "")
+  - name: who
+    expression: request.userInfo.username
   - name: allowed
     expression: >-
-      (request.resource.group == "extensions.agents.x-k8s.io" && request.resource.resource == "sandboxclaims" &&
+      (variables.who == "system:serviceaccount:agent:runner" &&
+       request.resource.group == "extensions.agents.x-k8s.io" && request.resource.resource == "sandboxclaims" &&
        variables.sub == "" && variables.ns == "sandboxes" && request.operation in ["CREATE", "DELETE"]) ||
-      (request.resource.group == "approval.safe-ops.io" && request.resource.resource == "changerequests" &&
+      (variables.who == "system:serviceaccount:agent:proposer" &&
+       request.resource.group == "approval.safe-ops.io" && request.resource.resource == "changerequests" &&
        variables.sub == "" && variables.ns == "approvals" && request.operation == "CREATE") ||
       (request.resource.group == "authorization.k8s.io" && request.resource.resource in ["selfsubjectaccessreviews", "selfsubjectrulesreviews"]) ||
       (request.resource.group == "authentication.k8s.io" && request.resource.resource == "selfsubjectreviews")
   validations:
   - expression: variables.allowed
     messageExpression: >-
-      "agent-write-guard: the agent may not " + request.operation + " " + variables.target +
+      "agent-write-guard: " + variables.who + " may not " + request.operation + " " + variables.target +
       "; changes to the cluster go through a ChangeRequest"
 ---
 apiVersion: admissionregistration.k8s.io/v1

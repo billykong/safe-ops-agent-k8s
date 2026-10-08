@@ -50,7 +50,7 @@ spec:
   matchConditions:
   - name: the-agent
     expression: >-
-      request.userInfo.username == "system:serviceaccount:agent:agent" ||
+      "system:serviceaccounts:agent" in request.userInfo.groups ||
       request.?namespace.orValue("") == "agent"
   validations:
   - expression: params.?data.?mode.orValue("") == "run"

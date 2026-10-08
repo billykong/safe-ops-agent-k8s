@@ -7,6 +7,7 @@ Weaknesses we know about, have reproduced, and haven't closed yet. Each has an I
 | [GAP-01](#gap-01-domain-fronting-through-the-pypi-egress-allowlist) | Domain fronting through the PyPI egress allowlist | High for sandboxes with egress; none for default sandboxes | Open | [P1-13](prd/projects/p1-sandboxed-code-exec.md) |
 | [GAP-02](#gap-02-admission-guards-cant-protect-their-own-configuration) | Admission guards can't protect their own configuration | Low today (the agent has no such RBAC); critical if that RBAC is ever granted | Open (inherent; mitigated by RBAC tests) | [P2-13, P2-14, P2-21](prd/projects/p2-approval-gate.md) |
 | [GAP-03](#gap-03-temporals-frontend-has-no-authentication) | Temporal's frontend has no authentication | Low (only the agent's worker can reach it, and it can already do what the API allows) | Open (accepted for the dev server) | [P2-30](prd/projects/p2-approval-gate.md) |
+| [GAP-04](#gap-04-agent-to-gateway-traffic-is-plaintext) | Agent-to-gateway traffic is plaintext | Low on one node; Medium on multi-node clusters | Open | [P3-24](prd/projects/p3-tool-identity-policy.md) |
 
 ## GAP-01: domain fronting through the PyPI egress allowlist
 
@@ -110,3 +111,27 @@ The dev server is also a single process with SQLite on one volume: no high avail
 ### Status
 
 Open, accepted for the development server. Revisit when Temporal moves to a production-style deployment or any second client needs access.
+
+## GAP-04: agent-to-gateway traffic is plaintext
+
+**Found:** 2026-10-08, P3 milestone 1.
+
+### What's wrong
+
+Agents call the LLM gateway over plain HTTP on the pod network, with their gateway token in the `Authorization` header. Whoever can read pod traffic (a compromised node, a privileged pod with host networking, a misconfigured mirror) can copy the token. The gateway also isn't authenticated to the agent: something answering on the gateway's address could collect tokens and feed the agent responses.
+
+### Impact
+
+Limited by the token's design: it's valid only for the gateway's audience (the API server and any other service refuse it), bound to its pod, and expires in at most 10 minutes. The response side matters more from milestone 2, when model output flows back over this connection. On this single-node kind cluster, traffic doesn't leave the node.
+
+### Options
+
+| Option | Closes it? | Cost |
+| --- | --- | --- |
+| Cilium transparent encryption (WireGuard) between nodes | For node-to-node traffic only; same-node traffic stays clear | A Cilium setting; WSL2 kernel support to check |
+| TLS on the gateway, with a cluster CA the agents trust | Confidentiality and gateway authentication | Certificate issuance and rotation (cert-manager) |
+| Mutual TLS with SPIFFE identities (SPIRE, or Cilium's mutual authentication) | Both directions (P3-24) | SPIRE to run |
+
+### Status
+
+Open. Planned with P3-24 (mutual authentication), once the gateway carries model traffic.

@@ -11,18 +11,26 @@ spec:
     metadata:
       labels: {app: agent}
     spec:
-      serviceAccountName: agent
+      serviceAccountName: runner
+      automountServiceAccountToken: false
       restartPolicy: Never
       securityContext:
         runAsNonRoot: true
         runAsUser: 65534
         runAsGroup: 65534
         seccompProfile: {type: RuntimeDefault}
+      # The gateway's name is the only one Cilium's DNS proxy answers for
+      # agent pods; with the default ndots:5 the resolver would try search
+      # domain variants first and be refused.
+      dnsConfig:
+        options: [{name: ndots, value: "1"}]
       containers:
       - name: agent
         image: sandbox-agent:dev
         imagePullPolicy: Never
         env:
+        - {name: LLM_GATEWAY_URL, value: "http://llm-gateway.gateways.svc.cluster.local:8080"}
+        - {name: LLM_GATEWAY_TOKEN_FILE, value: /var/run/secrets/safe-ops.io/llm-gateway/token}
         - name: TASK_CODE
           value: |
             import platform, sys
@@ -35,3 +43,25 @@ spec:
         resources:
           requests: {cpu: 50m, memory: 64Mi}
           limits: {cpu: 250m, memory: 128Mi}
+        volumeMounts:
+        - {name: kube-api, mountPath: /var/run/secrets/kubernetes.io/serviceaccount, readOnly: true}
+        - {name: llm-gateway-token, mountPath: /var/run/secrets/safe-ops.io/llm-gateway, readOnly: true}
+      volumes:
+      # The API token, projected explicitly instead of automounted: the
+      # automounted one is valid for a year on this cluster (the API server
+      # extends tokens requested with the automount default,
+      # --service-account-extend-token-expiration), this one for an hour.
+      # Same path and files as the automounted volume.
+      - name: kube-api
+        projected:
+          sources:
+          - serviceAccountToken: {expirationSeconds: 3600, path: token}
+          - configMap: {name: kube-root-ca.crt, items: [{key: ca.crt, path: ca.crt}]}
+          - downwardAPI: {items: [{path: namespace, fieldRef: {fieldPath: metadata.namespace}}]}
+      # The runner's identity for the LLM gateway (P3-01): a token for that
+      # audience only (the API server refuses it), bound to this pod, valid
+      # 10 minutes and refreshed by the kubelet.
+      - name: llm-gateway-token
+        projected:
+          sources:
+          - serviceAccountToken: {audience: llm-gateway.safe-ops.io, expirationSeconds: 600, path: token}

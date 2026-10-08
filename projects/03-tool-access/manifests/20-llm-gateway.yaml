@@ -1,0 +1,63 @@
+# The LLM gateway (P3-02). Milestone 1: the authentication front door only
+# (GET /whoami). Accepts pod-bound tokens for audience
+# llm-gateway.safe-ops.io from the listed agent identities.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-gateway
+  namespace: gateways
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: llm-gateway}
+  template:
+    metadata:
+      labels: {app: llm-gateway}
+    spec:
+      serviceAccountName: llm-gateway
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: gateway
+        image: agent-gateway:dev
+        imagePullPolicy: Never
+        env:
+        - {name: AUDIENCE, value: llm-gateway.safe-ops.io}
+        - {name: ALLOWED_IDENTITIES, value: "system:serviceaccount:agent:runner,system:serviceaccount:agent:proposer"}
+        # How long a token review is reused: the most a revoked identity
+        # can still get through after the kill switch.
+        - {name: REVIEW_CACHE_TTL, value: 10s}
+        ports:
+        - {name: http, containerPort: 8080}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        resources:
+          requests: {cpu: 20m, memory: 32Mi}
+          limits: {cpu: 200m, memory: 64Mi}
+        volumeMounts:
+        - {name: kube-api, mountPath: /var/run/secrets/kubernetes.io/serviceaccount, readOnly: true}
+      # API token projected explicitly for an hour; the automounted one is
+      # valid for a year on this cluster (P3 README finding 2).
+      volumes:
+      - name: kube-api
+        projected:
+          sources:
+          - serviceAccountToken: {expirationSeconds: 3600, path: token}
+          - configMap: {name: kube-root-ca.crt, items: [{key: ca.crt, path: ca.crt}]}
+          - downwardAPI: {items: [{path: namespace, fieldRef: {fieldPath: metadata.namespace}}]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-gateway
+  namespace: gateways
+spec:
+  selector: {app: llm-gateway}
+  ports:
+  - {name: http, port: 8080, targetPort: http}

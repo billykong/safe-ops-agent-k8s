@@ -8,7 +8,7 @@
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 cd "$(dirname "$0")/.."
-AGENT=system:serviceaccount:agent:agent
+AGENT=system:serviceaccount:agent:proposer
 CTRL=system:serviceaccount:approval-system:approval-controller
 CLI=projects/02-approval-gate/bin/approvalctl
 NS=approvals

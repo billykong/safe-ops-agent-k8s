@@ -9,8 +9,11 @@
 # GAP-02). Exits non-zero on any FAIL.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
-AGENT=system:serviceaccount:agent:agent
+# Two agent identities, each allowed only its own job's writes.
+AGENT=system:serviceaccount:agent:proposer
 AS=--as=$AGENT
+RUNNER=system:serviceaccount:agent:runner
+RAS=--as=$RUNNER
 FAILED=0
 pass() { echo "PASS  $1"; }
 fail() { echo "FAIL  $1"; FAILED=1; }
@@ -56,10 +59,12 @@ spec:
 YAML
 }
 allowed_work() { # $1: label suffix
-  IN=claim allowed "create a SandboxClaim in sandboxes$1" kubectl create $AS --dry-run=server -f -
-  IN=proposal allowed "create a ChangeRequest in approvals$1" kubectl create $AS --dry-run=server -f -
-  out=$(kubectl auth whoami $AS 2>&1 || true)
-  grep -q "$AGENT" <<<"$out" && pass "allowed: ask who it is (SelfSubjectReview)$1" || fail "whoami$1: ${out:0:200}"
+  IN=claim allowed "runner: create a SandboxClaim in sandboxes$1" kubectl create $RAS --dry-run=server -f -
+  IN=proposal allowed "proposer: create a ChangeRequest in approvals$1" kubectl create $AS --dry-run=server -f -
+  for id in $AGENT $RUNNER; do
+    out=$(kubectl auth whoami --as=$id 2>&1 || true)
+    grep -q "$id" <<<"$out" && pass "allowed: ${id##*:} asks who it is (SelfSubjectReview)$1" || fail "whoami$1: ${out:0:200}"
+  done
 }
 
 echo "--- the agent's own work still passes"
@@ -68,7 +73,12 @@ allowed_work ""
 
 echo "--- what an admission guard can't see: these must never be granted"
 can() { kubectl auth can-i "$@" $AS 2>/dev/null || true; }
-never() { local d=$1; shift; [ "$(can "$@")" = no ] && pass "agent may not $d" || fail "agent MAY $d"; }
+never() { # for every agent identity
+  local d=$1; shift
+  for id in $AGENT $RUNNER; do
+    [ "$(kubectl auth can-i "$@" --as=$id 2>/dev/null || true)" = no ] && pass "${id##*:} may not $d" || fail "${id##*:} MAY $d"
+  done
+}
 never "impersonate users"                  impersonate users
 never "impersonate groups"                 impersonate groups
 never "impersonate service accounts"       impersonate serviceaccounts
@@ -103,7 +113,10 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata: {name: test-agent-widened}
-subjects: [{kind: ServiceAccount, name: agent, namespace: agent}]
+subjects:
+- {kind: ServiceAccount, name: proposer, namespace: agent}
+- {kind: ServiceAccount, name: runner, namespace: agent}
+- {kind: ServiceAccount, name: default, namespace: agent}   # an identity with no job at all
 roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: test-agent-widened}
 YAML
 for _ in $(seq 1 20); do [ "$(can patch deployments.apps -n workloads)" = yes ] && break; sleep 1; done
@@ -124,6 +137,12 @@ denied "remove its own RBAC widening"        kubectl delete clusterrolebinding t
 SBX=$(kubectl get pod -n sandboxes -o jsonpath='{.items[0].metadata.name}')
 denied "exec into a sandbox (CONNECT pods/exec)" kubectl exec -n sandboxes "$SBX" $AS -- true
 allowed_work " (still, while widened)"
+echo "--- each identity only its own job, even widened"
+IN=proposal denied "runner proposing a ChangeRequest"   kubectl create $RAS --dry-run=server -f -
+IN=claim denied "proposer claiming a sandbox"            kubectl create $AS --dry-run=server -f -
+denied "an identity added later (agent/default) writing anything" \
+  kubectl create configmap guard-probe -n agent --from-literal=k=v --as=system:serviceaccount:agent:default --dry-run=server
+IN=claim denied "an identity added later claiming a sandbox" kubectl create --as=system:serviceaccount:agent:default --dry-run=server -f -
 out=$(kubectl delete validatingadmissionpolicy agent-write-guard $AS --dry-run=server 2>&1 || true)
 if admitted "$out"; then gap GAP-02 "with RBAC on admission policies the agent could delete the guard itself (not applied to admission configuration)"
 else pass "guard refused deleting itself (if this ever passes, update GAP-02)"; fi

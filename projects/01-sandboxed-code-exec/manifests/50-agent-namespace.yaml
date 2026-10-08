@@ -6,8 +6,20 @@ metadata:
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest
 ---
+# One identity per agent (P3-01), each with only its own job's RBAC:
+# - runner: claims sandboxes and runs code in them (P1's agent Job);
+# - proposer: proposes ChangeRequests (P2's Temporal worker).
+# A compromised runner can't propose changes; the proposer can't run code.
+# Policies match the namespace's group, system:serviceaccounts:agent, so
+# every identity here is treated as an agent, including ones added later.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: agent
+  name: runner
+  namespace: agent
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: proposer
   namespace: agent

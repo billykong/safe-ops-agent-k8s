@@ -1,5 +1,7 @@
 # Agent namespace: default deny both ways, then allow only what the agent
-# needs. No DNS: the agent reaches the API server by IP.
+# needs. The API server is reached by IP. DNS answers one name only, the
+# LLM gateway's, through Cilium's DNS proxy
+# (projects/03-tool-access/manifests/30-networkpolicy.yaml).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
