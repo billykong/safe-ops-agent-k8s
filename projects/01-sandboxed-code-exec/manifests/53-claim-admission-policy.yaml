@@ -15,8 +15,8 @@ spec:
       resources: ["sandboxclaims"]
       operations: ["CREATE", "UPDATE"]
   matchConditions:
-  - name: agent-only
-    expression: request.userInfo.username == "system:serviceaccount:agent:agent"
+  - name: agent-identities
+    expression: '"system:serviceaccounts:agent" in request.userInfo.groups'
   validations:
   - expression: object.spec.warmPoolRef.name in ["python-gvisor", "python-gvisor-pypi", "python-kata"]
     message: warmPoolRef must be an approved warm pool

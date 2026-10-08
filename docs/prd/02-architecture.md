@@ -56,7 +56,7 @@ flowchart LR
 | **Sandbox pod** (agent-sandbox `Sandbox` from a `SandboxTemplate`, gVisor) | P1 | Untrusted: runs generated code | Nothing: no SA token, no network, no secrets | Built |
 | **Executor** (HTTP service inside the sandbox) | P1 | Not a boundary: same uid as user code | Nothing | Built |
 | **Warm pool** (`SandboxWarmPool`) | P1 | Infrastructure | Pre-started sandboxes | Built |
-| **Agent loop** | P1-P3 | Semi-trusted: its inputs are attacker-influenced | A workload identity; no write credentials; no model key | Built as a scripted Job (P1); LLM loop in P3 |
+| **Agent loop** | P1-P3 | Semi-trusted: its inputs are attacker-influenced | One workload identity per agent (`runner`, `proposer`); no write credentials; no model key | Built as a scripted Job (P1) and a Temporal worker (P2); LLM loop in P3 |
 | **LLM gateway** | P3 | Trusted | Model API key; token budgets and rate limits | Planned |
 | **MCP / tool gateway** | P3 | Trusted | Tool secrets; per-agent authorisation | Planned |
 | **Policy engine** (Kyverno/OPA; ValidatingAdmissionPolicy) | P1-P3 | Trusted | Rules: allow, deny, escalate | VAP for sandbox claims built (P1); rest planned |

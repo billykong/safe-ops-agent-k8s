@@ -8,8 +8,8 @@ Requirements and status: [docs/prd/projects/p2-approval-gate.md](../../docs/prd/
 ## Milestones
 1. [x] `ChangeRequest` CRD with immutable spec, status-subresource approval, and the controller (kubebuilder)
 2. [x] Approval CLI (`approvalctl`) with authenticated approver identity; hash binding and expiry. `make p2 test-approval`: 58 checks
-3. [x] Admission guard rejecting direct writes by the agent's identity (a ValidatingAdmissionPolicy). `make test-agent-guard`: 33 checks
-4. [x] Change budget and kill switch, with a runbook. `make test-budget`: 34 checks; `make test-kill-switch`: 42 checks
+3. [x] Admission guard rejecting direct writes by the agent's identity (a ValidatingAdmissionPolicy). `make test-agent-guard`: 50 checks (33 at the time; per-identity checks added in P3)
+4. [x] Change budget and kill switch, with a runbook. `make test-budget`: 32 checks; `make test-kill-switch`: 43 checks
 5. [x] Durable execution across long approvals, with Temporal; pod-restart demo. `make durable test-durable`: 40 checks
 6. [x] Computed review packet and oversight metrics. `make test-review`: 38 checks
 
@@ -17,7 +17,7 @@ Requirements and status: [docs/prd/projects/p2-approval-gate.md](../../docs/prd/
 
 ```mermaid
 sequenceDiagram
-  participant A as Agent (SA agent/agent)
+  participant A as Agent (SA agent/proposer)
   participant K as API server
   participant H as Human
   participant C as approval-controller
@@ -100,7 +100,7 @@ sequenceDiagram
 21. **An absent map and an empty one diff as different.** A rollback that removes the only restart annotation leaves `annotations: {}`, while the pre-state had no `annotations` at all; the first rollback check reported that as a change. The diff now descends into a map when the other side has none. Numbers needed the same care: the object converter yields `int64`, JSON `float64`, so the rollback check compares JSON with JSON.
 22. **Approving a stale proposal in a test hit drift, correctly.** A request reviewed before another change scaled the target re-proposed on approval instead of applying. The test now decides on a fresh proposal; the behaviour is P2-04 doing its job.
 23. **Backgrounding a shell function loses the process.** `kubectl port-forward ... &` through `scripts/lib.sh`'s context-pinning `kubectl` function backgrounds a subshell; `$!` is the subshell, and killing it left the port-forward running after the test. The test backgrounds the `kubectl` binary itself (`command kubectl --context ...`).
-24. **The kill-switch suite has 42 checks, not 46.** The count reported in milestone 4 was a miscount; the suite is unchanged.
+24. **Two check counts were reported wrong.** The kill-switch suite had 42 checks, not 46 (milestone 4), and the budget suite 31, then 32, not 33 and 34 (milestones 4 and 6). They were added up by hand instead of counted. Counts in this README now come from the PASS lines of a run.
 
 ## Not yet
 - Seeded known-bad proposals to measure approvers' catch rate (P2-43): P4's eval suite.
@@ -117,9 +117,9 @@ The controller binary is built on the host (`make build`; Go from `scripts/setup
 ./scripts/setup-go.sh                   # once, no sudo: Go into ~/.local/go
 make p2                                 # build controller and CLI, apply CRD, RBAC, policies, controller
 make test-approval                      # 58 checks
-make test-agent-guard                   # 33 checks; temporarily widens the agent's RBAC
-make test-budget                        # 34 checks; creates and removes a ChangeBudget
-make test-kill-switch                   # 42 checks; stops a running agent, resumes, leaves mode=run
+make test-agent-guard                   # 50 checks; temporarily widens the agent's RBAC
+make test-budget                        # 32 checks; creates and removes a ChangeBudget
+make test-kill-switch                   # 43 checks; stops a running agent, resumes, leaves mode=run
 make durable                            # Temporal and the agent worker
 make test-durable                       # 40 checks; restarts both mid-approval
 make test-review                        # 38 checks; review packet, overrides, oversight metrics, rollback

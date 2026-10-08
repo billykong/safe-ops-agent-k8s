@@ -1,4 +1,4 @@
-# The agent may only claim, read and release sandboxes, and read a Sandbox
+# The runner agent may only claim, read and release sandboxes, and read a Sandbox
 # to find its pod IP. Nothing else: no pods, exec, secrets, or creating
 # Sandboxes directly (which would bypass the hardened template). No
 # update/patch either, so a claim can't be changed after admission.
@@ -22,7 +22,7 @@ metadata:
   namespace: sandboxes
 subjects:
 - kind: ServiceAccount
-  name: agent
+  name: runner
   namespace: agent
 roleRef:
   apiGroup: rbac.authorization.k8s.io

@@ -18,7 +18,8 @@
 #      old work.
 #   3. scale to zero: suspend Jobs and CronJobs, scale Deployments and
 #      StatefulSets to 0, delete the remaining pods in the agent namespace.
-#   4. revoke credentials: delete and recreate ServiceAccount agent/agent.
+#   4. revoke credentials: delete and recreate every ServiceAccount in the
+#      agent namespace (one per agent identity).
 #      Every token issued for it, including copies taken out of the
 #      cluster, names the old UID and is refused from then on, for reads
 #      too (admission never sees reads).
@@ -27,7 +28,7 @@
 # else: the agent's workloads stay suspended until someone restarts them.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
-CM_NS=approval-system CM=agent-kill-switch AGENT_NS=agent SA=agent
+CM_NS=approval-system CM=agent-kill-switch AGENT_NS=agent
 TEMPORAL_NS=temporal
 
 # The Temporal CLI inside the server's pod (the frontend admits no one
@@ -74,7 +75,7 @@ status() {
   echo "flag:          mode=${mode:-<empty>: stopped} $(kubectl get configmap -n $CM_NS $CM -o jsonpath='reason="{.data.reason}" by={.data.by} at={.data.at}' 2>/dev/null || true)"
   echo "agent pods:    $(kubectl get pods -n $AGENT_NS --no-headers 2>/dev/null | wc -l)"
   echo "jobs:          $(kubectl get jobs -n $AGENT_NS -o jsonpath='{range .items[*]}{.metadata.name}(suspend={.spec.suspend}) {end}')"
-  echo "agent SA uid:  $(kubectl get sa -n $AGENT_NS $SA -o jsonpath='{.metadata.uid}' 2>/dev/null || echo missing)"
+  echo "agent SAs:     $(kubectl get sa -n $AGENT_NS -o jsonpath='{range .items[*]}{.metadata.name}({.metadata.uid}) {end}' 2>/dev/null)"
   echo "agent claims:  $(kubectl get sandboxclaims -n sandboxes -o name 2>/dev/null | grep -c '/agent-' || true)"
   echo "open requests: $(open_crs | wc -l)"
   if has_temporal; then echo "workflows:     $(running_workflows | wc -l) running"; fi
@@ -106,10 +107,12 @@ stop)
   for w in $(kubectl get deployments,statefulsets -n $AGENT_NS -o name); do kubectl scale -n $AGENT_NS "$w" --replicas=0 >/dev/null; done
   kubectl delete pods -n $AGENT_NS --all --wait=false >/dev/null
   echo "3. scaled to zero: jobs suspended, deployments at 0, pods deleting"
-  old=$(kubectl get sa -n $AGENT_NS $SA -o jsonpath='{.metadata.uid}' 2>/dev/null || echo none)
-  kubectl delete sa -n $AGENT_NS $SA --ignore-not-found >/dev/null
-  kubectl create sa -n $AGENT_NS $SA >/dev/null
-  echo "4. credentials revoked: ServiceAccount $AGENT_NS/$SA recreated (uid $old -> $(kubectl get sa -n $AGENT_NS $SA -o jsonpath='{.metadata.uid}'))"
+  # Every identity in the namespace, not a list: an agent identity added
+  # later is revoked too. (default is recreated by Kubernetes itself.)
+  sas=$(kubectl get sa -n $AGENT_NS -o jsonpath='{.items[*].metadata.name}')
+  for sa in $sas; do kubectl delete sa -n $AGENT_NS "$sa" --ignore-not-found >/dev/null; done
+  for sa in $sas; do kubectl create sa -n $AGENT_NS "$sa" >/dev/null 2>&1 || true; done
+  echo "4. credentials revoked: ServiceAccounts recreated with new UIDs: $sas"
   claims=$(kubectl get sandboxclaims -n sandboxes -o name 2>/dev/null | grep '/agent-' || true)
   [ -z "$claims" ] || kubectl delete -n sandboxes $claims --wait=false >/dev/null
   echo "5. sandboxes released: $(wc -w <<<"$claims") claim(s)"

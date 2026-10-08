@@ -1,0 +1,68 @@
+# Gateways: reachable only from the agent namespace, and reach only the API
+# server (token reviews). Milestone 2 adds the model provider's API.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: gateways
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: llm-gateway-from-agents
+  namespace: gateways
+spec:
+  podSelector:
+    matchLabels: {app: llm-gateway}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: agent}
+    ports:
+    - {port: 8080, protocol: TCP}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: llm-gateway-to-apiserver
+  namespace: gateways
+spec:
+  endpointSelector:
+    matchLabels: {app: llm-gateway}
+  egress:
+  - toEntities: [kube-apiserver]
+    toPorts:
+    - ports: [{port: "6443", protocol: TCP}]
+---
+# Agent side: every pod in the agent namespace may resolve the gateway's
+# name (and only that, through Cilium's DNS proxy) and connect to it.
+# Being able to connect isn't being let in: the gateway checks identity.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agents-to-gateways
+  namespace: agent
+spec:
+  endpointSelector: {}
+  egress:
+  - toEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: kube-system
+        k8s:k8s-app: kube-dns
+    toPorts:
+    - ports:
+      - {port: "53", protocol: UDP}
+      - {port: "53", protocol: TCP}
+      rules:
+        dns:
+        - matchName: llm-gateway.gateways.svc.cluster.local
+  - toEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: gateways
+        app: llm-gateway
+    toPorts:
+    - ports: [{port: "8080", protocol: TCP}]

@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review
+.PHONY: client-image up down node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -167,6 +167,18 @@ test-durable:
 
 test-review:
 	./scripts/test-review.sh
+
+# P3: the agents' gateway (milestone 1: workload-identity authentication).
+P3 := projects/03-tool-access
+p3:
+	$(MAKE) -C $(P3)/gateway kind-load CLUSTER=$(CLUSTER)
+	$(KUBECTL) apply -f $(P3)/manifests/00-namespace.yaml
+	$(KUBECTL) apply -f $(P3)/manifests/
+	$(KUBECTL) -n gateways rollout restart deploy/llm-gateway
+	$(KUBECTL) -n gateways rollout status deploy/llm-gateway --timeout=120s
+
+test-identity:
+	./scripts/test-identity.sh
 
 test-budget:
 	./scripts/test-budget.sh

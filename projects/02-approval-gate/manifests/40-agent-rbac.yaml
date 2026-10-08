@@ -1,4 +1,4 @@
-# The agent may propose and read ChangeRequests in the approvals namespace.
+# The proposer agent may propose and read ChangeRequests in the approvals namespace.
 # No update/patch (the spec is immutable anyway), no delete, and nothing on
 # changerequests/status: approval lives there (P2-10). No write access to
 # workloads at all.
@@ -19,7 +19,7 @@ metadata:
   namespace: approvals
 subjects:
 - kind: ServiceAccount
-  name: agent
+  name: proposer
   namespace: agent
 roleRef:
   apiGroup: rbac.authorization.k8s.io
