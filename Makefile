@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway
+.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -190,16 +190,32 @@ p3:
 	# Secret anthropic-api-key, created by you (scripts/llm-gateway-mode.sh).
 	$(KUBECTL) get secret -n gateways mock-provider-key >/dev/null 2>&1 || \
 	  $(KUBECTL) create secret generic -n gateways mock-provider-key --from-literal=api-key=mock-$$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+	docker build -t mcp-tools:dev $(P3)/mcp
+	kind load docker-image mcp-tools:dev --name $(CLUSTER)
+	$(KUBECTL) apply -f $(P3)/manifests/50-mcp-servers.yaml
+	# The incident tracker's API token: random, created once, in the two
+	# namespaces that hold it (the tracker checks it; the MCP gateway adds
+	# it to tool calls). The agents never get it.
+	$(KUBECTL) get secret -n mcp-servers incident-tracker-token >/dev/null 2>&1 || { \
+	  t=$$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'); \
+	  $(KUBECTL) create secret generic -n mcp-servers incident-tracker-token --from-literal=token=$$t && \
+	  $(KUBECTL) create secret generic -n gateways incident-tracker-token --from-literal=token=$$t; }
 	$(KUBECTL) apply -f $(P3)/manifests/
-	$(KUBECTL) -n gateways rollout restart deploy/llm-gateway deploy/mock-model
+	$(KUBECTL) -n gateways rollout restart deploy/llm-gateway deploy/mock-model deploy/mcp-gateway
+	$(KUBECTL) -n mcp-servers rollout restart deploy/incidents-mcp deploy/incident-tracker
 	$(KUBECTL) -n gateways rollout status deploy/llm-gateway --timeout=120s
 	$(KUBECTL) -n gateways rollout status deploy/mock-model --timeout=120s
+	$(KUBECTL) -n gateways rollout status deploy/mcp-gateway --timeout=120s
+	$(KUBECTL) -n mcp-servers rollout status deploy/incidents-mcp --timeout=120s
 
 test-identity:
 	./scripts/test-identity.sh
 
 test-llm-gateway:
 	./scripts/test-llm-gateway.sh
+
+test-mcp:
+	./scripts/test-mcp.sh
 
 test-budget:
 	./scripts/test-budget.sh

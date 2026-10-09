@@ -1,0 +1,5 @@
+# The MCP gateway. Built on the host like the LLM gateway.
+FROM gcr.io/distroless/static:nonroot
+COPY bin/mcpgateway /mcpgateway
+USER 65532:65532
+ENTRYPOINT ["/mcpgateway"]

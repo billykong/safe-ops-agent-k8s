@@ -93,13 +93,14 @@ class AgentWorkflow:
             start_to_close_timeout=timedelta(seconds=150), retry_policy=RetryPolicy(maximum_attempts=2))
         if d.action == "Escalate":
             self._state = "escalated"
-            return AgentOutcome(goal=goal.name, action=d.action, reason=d.reason, detail=d.detail)
+            return AgentOutcome(goal=goal.name, action=d.action, reason=d.reason, detail=d.detail, tools_used=d.tools_used)
         action = {"type": d.action, "target": {"kind": "Deployment", "namespace": goal.target_namespace, "name": goal.target_name}}
         if d.action == "ScaleDeployment":
             action["replicas"] = d.replicas
         task = ChangeTask(
             name=goal.name,
-            intent=(f"[model's reasoning, not verified] {d.reason}\n\n[operator's instruction] {goal.instruction}")[:2000],
+            intent=(f"[model's reasoning, not verified] {d.reason}\n\n[operator's instruction] {goal.instruction}"
+                    + (f"\n\n[tools read] {', '.join(d.tools_used)}" if d.tools_used else ""))[:2000],
             action=action,
             blast_radius="not assessed by the agent: see the controller's review packet",
             rollback="apply the controller's recorded rollbackPlan",
@@ -110,4 +111,4 @@ class AgentWorkflow:
         change: Outcome = await workflow.execute_child_workflow(
             ChangeWorkflow.run, task, id=f"{goal.name}-change", result_type=Outcome)
         self._state = change.phase
-        return AgentOutcome(goal=goal.name, action=d.action, reason=d.reason, change=change)
+        return AgentOutcome(goal=goal.name, action=d.action, reason=d.reason, change=change, tools_used=d.tools_used)

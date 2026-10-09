@@ -1,0 +1,144 @@
+# MCP servers and what they call (P3-04). The incidents server holds no
+# secret: the MCP gateway adds the tracker's token to each tool call. The
+# tracker (a stand-in for an external SaaS) is reachable only from the
+# incidents server, and the incidents server only from the MCP gateway.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mcp-servers
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-tracker
+  namespace: mcp-servers
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: incident-tracker}
+  template:
+    metadata:
+      labels: {app: incident-tracker}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 65534, runAsGroup: 65534, seccompProfile: {type: RuntimeDefault}}
+      containers:
+      - name: tracker
+        image: mcp-tools:dev
+        imagePullPolicy: Never
+        args: [tracker.py]
+        ports: [{name: http, containerPort: 8080}]
+        securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+        resources:
+          requests: {cpu: 10m, memory: 32Mi}
+          limits: {cpu: 100m, memory: 64Mi}
+        volumeMounts:
+        - {name: token, mountPath: /var/run/secrets/safe-ops.io/tracker, readOnly: true}
+      volumes:
+      - name: token
+        secret: {secretName: incident-tracker-token, items: [{key: token, path: token}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: incident-tracker, namespace: mcp-servers}
+spec:
+  selector: {app: incident-tracker}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incidents-mcp
+  namespace: mcp-servers
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: incidents-mcp}
+  template:
+    metadata:
+      labels: {app: incidents-mcp}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 65534, runAsGroup: 65534, seccompProfile: {type: RuntimeDefault}}
+      dnsConfig:
+        options: [{name: ndots, value: "1"}]
+      containers:
+      - name: mcp
+        image: mcp-tools:dev
+        imagePullPolicy: Never
+        env:
+        - {name: TRACKER_URL, value: "http://incident-tracker.mcp-servers.svc.cluster.local:8080"}
+        - {name: ALLOWED_HOSTS, value: "incidents-mcp.mcp-servers.svc.cluster.local:8080"}
+        ports: [{name: http, containerPort: 8080}]
+        securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+        resources:
+          requests: {cpu: 20m, memory: 64Mi}
+          limits: {cpu: 200m, memory: 128Mi}
+        volumeMounts:
+        - {name: tmp, mountPath: /tmp}
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: incidents-mcp, namespace: mcp-servers}
+spec:
+  selector: {app: incidents-mcp}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: default-deny-all, namespace: mcp-servers}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: incidents-mcp-from-gateway, namespace: mcp-servers}
+spec:
+  podSelector:
+    matchLabels: {app: incidents-mcp}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: gateways}
+      podSelector:
+        matchLabels: {app: mcp-gateway}
+    ports: [{port: 8080, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: tracker-from-incidents-mcp, namespace: mcp-servers}
+spec:
+  podSelector:
+    matchLabels: {app: incident-tracker}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: {app: incidents-mcp}
+    ports: [{port: 8080, protocol: TCP}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: {name: incidents-mcp-egress, namespace: mcp-servers}
+spec:
+  endpointSelector:
+    matchLabels: {app: incidents-mcp}
+  egress:
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: kube-system, k8s:k8s-app: kube-dns}
+    toPorts:
+    - ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}]
+      rules:
+        dns: [{matchName: incident-tracker.mcp-servers.svc.cluster.local}]
+  - toEndpoints:
+    - matchLabels: {app: incident-tracker}
+    toPorts:
+    - ports: [{port: "8080", protocol: TCP}]

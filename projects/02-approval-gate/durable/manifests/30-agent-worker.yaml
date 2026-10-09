@@ -34,6 +34,9 @@ spec:
         - {name: TEMPORAL_ADDRESS, value: "temporal.temporal.svc.cluster.local:7233"}
         - {name: LLM_GATEWAY_URL, value: "http://llm-gateway.gateways.svc.cluster.local:8080"}
         - {name: LLM_GATEWAY_TOKEN_FILE, value: /var/run/secrets/safe-ops.io/llm-gateway/token}
+        # MCP tools, only through the MCP gateway (P3-04): server=url pairs.
+        - {name: MCP_SERVERS, value: "incidents=http://mcp-gateway.gateways.svc.cluster.local:8080/mcp/incidents"}
+        - {name: MCP_GATEWAY_TOKEN_FILE, value: /var/run/secrets/safe-ops.io/mcp-gateway/token}
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
@@ -45,6 +48,7 @@ spec:
         - {name: tmp, mountPath: /tmp}
         - {name: kube-api, mountPath: /var/run/secrets/kubernetes.io/serviceaccount, readOnly: true}
         - {name: llm-gateway-token, mountPath: /var/run/secrets/safe-ops.io/llm-gateway, readOnly: true}
+        - {name: mcp-gateway-token, mountPath: /var/run/secrets/safe-ops.io/mcp-gateway, readOnly: true}
       volumes:
       - name: tmp
         emptyDir: {}
@@ -65,6 +69,12 @@ spec:
         projected:
           sources:
           - serviceAccountToken: {audience: llm-gateway.safe-ops.io, expirationSeconds: 600, path: token}
+      # And for the MCP gateway: its own audience, so neither gateway can
+      # replay a token at the other.
+      - name: mcp-gateway-token
+        projected:
+          sources:
+          - serviceAccountToken: {audience: mcp-gateway.safe-ops.io, expirationSeconds: 600, path: token}
 ---
 # The worker reaches the API server, one DNS name, and Temporal's frontend.
 # Not the sandboxes: the agent Job runs code there, the worker doesn't.
