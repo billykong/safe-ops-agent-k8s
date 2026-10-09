@@ -1,0 +1,13 @@
+# gVisor (runsc) settings for the kind node, read by containerd's runsc
+# shim (ConfigPath in cluster/kind-gvisor.yaml). Installed into the node by
+# `make node-gvisor-platform`, which `make up` runs.
+#
+# Platform: KVM, not the default systrap. Since a WSL restart on
+# 2026-10-09 (after a .wslconfig change for other work on the same WSL),
+# systrap can't start any sandbox on this host: runsc panics with "failed
+# to create a syscall thread" (P3 README finding 7). The kvm and ptrace
+# platforms work; kvm is the faster of the two, and /dev/kvm is already
+# used by Kata (nested virtualization on WSL2). Results under it are in
+# the P1 README.
+[runsc_config]
+  platform = "kvm"

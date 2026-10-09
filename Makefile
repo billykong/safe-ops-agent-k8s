@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway
+.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -25,6 +25,7 @@ up:
 	KUBECONFIG=$$HOME/.kube/config:$$tmp/kind kubectl config view --flatten > $$tmp/merged; \
 	install -m 600 $$tmp/merged $$HOME/.kube/config
 	$(MAKE) node-swap-off
+	$(MAKE) node-gvisor-platform
 	$(MAKE) cilium
 	$(MAKE) coredns-upstream
 	$(MAKE) agent-sandbox
@@ -36,6 +37,18 @@ down:
 # pod's memory limit isn't a hard cap and a memory bomb thrashes the node.
 # kubelet's NoSwap only covers container cgroups; gVisor's memory is charged
 # at the pod level, so cap swap on the whole kubelet.slice instead.
+# gVisor's platform (cluster/runsc.toml): copy the settings into the node
+# and, on a cluster created before they existed, point containerd's runsc
+# runtime at them. Idempotent; restarts containerd only when its config
+# changes (running containers keep running).
+node-gvisor-platform:
+	docker cp cluster/runsc.toml $(CLUSTER)-control-plane:/etc/containerd/runsc.toml
+	docker exec $(CLUSTER)-control-plane sh -c '\
+	  grep -q "runtimes.runsc.options" /etc/containerd/config.toml || { \
+	    sed -i "/runtimes.runsc\]/{n;s|\$$|\n        [plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.runsc.options]\n          TypeUrl = \"io.containerd.runsc.v1.options\"\n          ConfigPath = \"/etc/containerd/runsc.toml\"|}" /etc/containerd/config.toml && \
+	    systemctl restart containerd; }; \
+	  grep -A3 "runtimes.runsc.options" /etc/containerd/config.toml'
+
 node-swap-off:
 	docker exec $(CLUSTER)-control-plane sh -c '\
 	  mkdir -p /etc/systemd/system/kubelet.slice.d && \

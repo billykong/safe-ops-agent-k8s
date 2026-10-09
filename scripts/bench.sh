@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Milestone 5: startup latency (warm-pool claim vs cold Sandbox, gVisor and
 # runc) and runtime overhead (gVisor vs runc on the same template). The
-# client runs in-cluster as a bench identity in the agent namespace, so it
-# sees what the agent sees. Writes
+# client runs in-cluster as its own bench identity, in a namespace of its own
+# (bench/rbac.yaml: the agent namespace is for agents only), with the same
+# route to the executors as an agent. Writes
 # projects/01-sandboxed-code-exec/results/benchmarks.md, with the raw samples
 # in benchmarks.jsonl (re-render with bench/report.py).
 #
@@ -19,25 +20,25 @@ REPORT=$P1/results/benchmarks.md
 RAW=$P1/results/benchmarks.jsonl
 TMP=$(mktemp -d)
 cleanup() {
-  kubectl delete pod -n agent bench-client --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kubectl delete pod -n bench bench-client --ignore-not-found --wait=false >/dev/null 2>&1 || true
   kubectl delete sandbox -n sandboxes -l bench=p1 --wait=false >/dev/null 2>&1 || true
   for c in $(kubectl get sandboxclaim -n sandboxes -o name 2>/dev/null | grep '/bench-'); do
     kubectl delete -n sandboxes "$c" --wait=false >/dev/null 2>&1 || true
   done
   kubectl delete -f $P1/bench/rbac.yaml --ignore-not-found >/dev/null 2>&1 || true
-  kubectl delete configmap -n agent bench-client --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete configmap -n bench bench-client --ignore-not-found >/dev/null 2>&1 || true
   rm -rf "$TMP"
 }
 trap cleanup EXIT
 
 kubectl apply -f $P1/bench/rbac.yaml >/dev/null
-kubectl create configmap bench-client -n agent --from-file=$P1/bench/bench_client.py \
+kubectl create configmap bench-client -n bench --from-file=$P1/bench/bench_client.py \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-kubectl delete pod -n agent bench-client --ignore-not-found --wait=true >/dev/null
+kubectl delete pod -n bench bench-client --ignore-not-found --wait=true >/dev/null
 kubectl apply -f - >/dev/null <<YAML
 apiVersion: v1
 kind: Pod
-metadata: {name: bench-client, namespace: agent, labels: {app: agent}}
+metadata: {name: bench-client, namespace: bench, labels: {app: bench-client}}
 spec:
   serviceAccountName: bench
   restartPolicy: Never
@@ -51,7 +52,7 @@ spec:
   volumes: [{name: client, configMap: {name: bench-client}}]
 YAML
 echo "bench ($RUNTIMES): $WARM warm claims, $COLD cold starts per runtime, burst of $BURST, $REPS overhead reps"
-kubectl wait -n agent pod/bench-client --for=jsonpath='{.status.phase}'=Running --timeout=120s >/dev/null
+kubectl wait -n bench pod/bench-client --for=jsonpath='{.status.phase}'=Running --timeout=120s >/dev/null
 cat > "$TMP/progress.py" <<'EOF'
 import json, sys
 for line in sys.stdin:
@@ -71,10 +72,10 @@ for line in sys.stdin:
 EOF
 # Live progress is best-effort (a log follow can drop); the results are the
 # full log once the pod has finished.
-kubectl logs -n agent bench-client -f | python3 "$TMP/progress.py" || true
-kubectl wait -n agent pod/bench-client --for=jsonpath='{.status.phase}'=Succeeded --timeout=1200s >/dev/null || true
-phase=$(kubectl get pod -n agent bench-client -o jsonpath='{.status.phase}')
-kubectl logs -n agent bench-client > "$TMP/results.jsonl"
+kubectl logs -n bench bench-client -f | python3 "$TMP/progress.py" || true
+kubectl wait -n bench pod/bench-client --for=jsonpath='{.status.phase}'=Succeeded --timeout=1200s >/dev/null || true
+phase=$(kubectl get pod -n bench bench-client -o jsonpath='{.status.phase}')
+kubectl logs -n bench bench-client > "$TMP/results.jsonl"
 [ "$phase" = Succeeded ] || { echo "bench client $phase"; tail -5 "$TMP/results.jsonl"; exit 1; }
 
 # Record the environment with the samples, then render the report from them.

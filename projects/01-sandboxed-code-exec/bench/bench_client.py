@@ -1,5 +1,5 @@
-"""Runs inside a bench pod in the agent namespace (label app=agent, so the
-agent's network policy applies: API server and sandbox port 8888 only).
+"""Runs inside a bench pod in its own namespace (scripts/bench.sh), with the
+same route to the sandboxes' port 8888 as the agents have.
 Prints one JSON line per sample.
 
 Usage: bench_client.py WARM_SAMPLES COLD_SAMPLES OVERHEAD_REPS BURST [RUNTIMES]
