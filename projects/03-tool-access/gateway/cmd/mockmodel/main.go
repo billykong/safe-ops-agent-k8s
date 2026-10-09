@@ -168,21 +168,28 @@ func main() {
 	}
 }
 
-// textOf joins the text of a message's content (string or blocks).
+// textOf joins the text of a message's content (string or blocks),
+// including tool results: after a tool call, the mock reacts to what the
+// tool returned, as a model would (and, like a fully compliant model, to
+// any directive or instruction in it).
 func textOf(c json.RawMessage) string {
 	var s string
 	if json.Unmarshal(c, &s) == nil {
 		return s
 	}
 	var blocks []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+		Type    string          `json:"type"`
+		Text    string          `json:"text"`
+		Content json.RawMessage `json:"content"`
 	}
 	json.Unmarshal(c, &blocks)
 	var b strings.Builder
 	for _, x := range blocks {
-		if x.Type == "text" {
+		switch x.Type {
+		case "text":
 			b.WriteString(x.Text + "\n")
+		case "tool_result":
+			b.WriteString(textOf(x.Content) + "\n")
 		}
 	}
 	return b.String()

@@ -87,8 +87,8 @@ spec:
     ports:
     - {port: 8080, protocol: TCP}
 ---
-# Agent side: every pod in the agent namespace may resolve the gateway's
-# name (and only that, through Cilium's DNS proxy) and connect to it.
+# Agent side: every pod in the agent namespace may resolve the gateways'
+# names (and only those, through Cilium's DNS proxy) and connect to them.
 # Being able to connect isn't being let in: the gateway checks identity.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -109,9 +109,16 @@ spec:
       rules:
         dns:
         - matchName: llm-gateway.gateways.svc.cluster.local
+        - matchName: mcp-gateway.gateways.svc.cluster.local
   - toEndpoints:
     - matchLabels:
         k8s:io.kubernetes.pod.namespace: gateways
         app: llm-gateway
+    toPorts:
+    - ports: [{port: "8080", protocol: TCP}]
+  - toEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: gateways
+        app: mcp-gateway
     toPorts:
     - ports: [{port: "8080", protocol: TCP}]

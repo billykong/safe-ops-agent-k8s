@@ -104,6 +104,8 @@ class ModelDecision:
     detail: str = ""
     model: str = ""
     request_id: str = ""
+    # MCP tools the model read before deciding (server__tool), in order.
+    tools_used: list = field(default_factory=list)
 
 
 @dataclass
@@ -113,3 +115,4 @@ class AgentOutcome:
     reason: str
     detail: str = ""
     change: Optional[Outcome] = None
+    tools_used: list = field(default_factory=list)

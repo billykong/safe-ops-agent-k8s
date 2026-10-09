@@ -45,8 +45,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 ### P3: identity, tools and policy
 1. **Done.** Per-agent workload identity: one service account per agent, audience-bound pod-bound tokens, the gateway's TokenReview authentication (`make p3 test-identity`).
 2. **Done.** LLM gateway holding the model key, with per-identity token budgets; the agent loop is model-driven, choosing typed actions through the approval gate (`make p3 test-llm-gateway`).
-3. **Next.** MCP servers behind a gateway brokering secrets; pinned descriptors.
-4. Kyverno or OPA as the semantic action gate.
+3. **Done.** MCP tools behind a gateway brokering their secrets; pinned descriptors, no discovery; AI-BOM (`make p3 test-mcp`, `scripts/ai-bom.sh`).
+4. **Next.** Kyverno or OPA as the semantic action gate.
 5. Prompt-injection red-team.
 
 ### P4: observability and evals
