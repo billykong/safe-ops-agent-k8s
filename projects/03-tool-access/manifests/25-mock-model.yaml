@@ -1,0 +1,55 @@
+# A stand-in for the model provider (gateway/cmd/mockmodel): deterministic,
+# free, and able to play a model that complies with anything, for the
+# tests and the red-team. It checks the gateway sends mock-provider-key
+# and records what it was sent (GET /debug/last).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-model
+  namespace: gateways
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: mock-model}
+  template:
+    metadata:
+      labels: {app: mock-model}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: mock
+        image: mock-model:dev
+        imagePullPolicy: Never
+        env:
+        - {name: API_KEY_FILE, value: /var/run/secrets/safe-ops.io/upstream/api-key}
+        ports:
+        - {name: http, containerPort: 8080}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        resources:
+          requests: {cpu: 10m, memory: 16Mi}
+          limits: {cpu: 100m, memory: 32Mi}
+        volumeMounts:
+        - {name: key, mountPath: /var/run/secrets/safe-ops.io/upstream, readOnly: true}
+      volumes:
+      - name: key
+        secret:
+          secretName: mock-provider-key
+          items: [{key: api-key, path: api-key}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-model
+  namespace: gateways
+spec:
+  selector: {app: mock-model}
+  ports:
+  - {name: http, port: 8080, targetPort: http}

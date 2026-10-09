@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity
+.PHONY: client-image up down node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -173,12 +173,20 @@ P3 := projects/03-tool-access
 p3:
 	$(MAKE) -C $(P3)/gateway kind-load CLUSTER=$(CLUSTER)
 	$(KUBECTL) apply -f $(P3)/manifests/00-namespace.yaml
+	# The mock provider's key: random, created once. A real key goes in
+	# Secret anthropic-api-key, created by you (scripts/llm-gateway-mode.sh).
+	$(KUBECTL) get secret -n gateways mock-provider-key >/dev/null 2>&1 || \
+	  $(KUBECTL) create secret generic -n gateways mock-provider-key --from-literal=api-key=mock-$$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
 	$(KUBECTL) apply -f $(P3)/manifests/
-	$(KUBECTL) -n gateways rollout restart deploy/llm-gateway
+	$(KUBECTL) -n gateways rollout restart deploy/llm-gateway deploy/mock-model
 	$(KUBECTL) -n gateways rollout status deploy/llm-gateway --timeout=120s
+	$(KUBECTL) -n gateways rollout status deploy/mock-model --timeout=120s
 
 test-identity:
 	./scripts/test-identity.sh
+
+test-llm-gateway:
+	./scripts/test-llm-gateway.sh
 
 test-budget:
 	./scripts/test-budget.sh

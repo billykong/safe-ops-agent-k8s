@@ -10,8 +10,9 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from activities import await_decision, log, propose
+from model import decide, observe
 from shared import TASK_QUEUE
-from workflows import ChangeWorkflow
+from workflows import AgentWorkflow, ChangeWorkflow
 
 ADDRESS = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")
 NAMESPACE = os.environ.get("TEMPORAL_NAMESPACE", "default")
@@ -34,8 +35,8 @@ async def main():
         return
     client = connect.result()
     with ThreadPoolExecutor(max_workers=8) as pool:
-        worker = Worker(client, task_queue=TASK_QUEUE, workflows=[ChangeWorkflow],
-                        activities=[propose, await_decision], activity_executor=pool)
+        worker = Worker(client, task_queue=TASK_QUEUE, workflows=[ChangeWorkflow, AgentWorkflow],
+                        activities=[propose, await_decision, observe, decide], activity_executor=pool)
         async with worker:
             log("worker_started", address=ADDRESS, namespace=NAMESPACE, task_queue=TASK_QUEUE)
             await stop.wait()

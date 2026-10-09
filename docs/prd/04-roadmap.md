@@ -44,8 +44,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 
 ### P3: identity, tools and policy
 1. **Done.** Per-agent workload identity: one service account per agent, audience-bound pod-bound tokens, the gateway's TokenReview authentication (`make p3 test-identity`).
-2. **Next.** LLM gateway holding the model key, with token budgets; agent loop switches from scripted to model-driven.
-3. MCP servers behind a gateway brokering secrets; pinned descriptors.
+2. **Done.** LLM gateway holding the model key, with per-identity token budgets; the agent loop is model-driven, choosing typed actions through the approval gate (`make p3 test-llm-gateway`).
+3. **Next.** MCP servers behind a gateway brokering secrets; pinned descriptors.
 4. Kyverno or OPA as the semantic action gate.
 5. Prompt-injection red-team.
 
@@ -90,4 +90,4 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 | ~~SPIFFE/SPIRE vs projected SA tokens for workload identity~~ Projected tokens: audience-bound, pod-bound, revocable, nothing extra to run. SPIRE only if mutual TLS (P3-24) or workloads outside Kubernetes need it. | Resolved (P3 M1) |
 | Does the NVIDIA device plugin work on WSL2's `/dev/dxg` with k3s? | P5 M2 |
 | ~~The kind node sees `/dev/kvm`. Does Kata work there?~~ Yes, with Cloud Hypervisor (QEMU needs `vhost_vsock`, absent from the WSL2 kernel). gVisor's KVM platform is untried. | Resolved (P1 M7) |
-| Which hosted model for the agent loop, and its cost budget | P3 M2 |
+| ~~Which hosted model for the agent loop, and its cost budget~~ `claude-opus-5-5` at effort `medium`, `max_tokens` 8000 per decision; 200 000 tokens per agent identity per hour at the gateway. All are settings (`AGENT_MODEL`, the gateway's `MODELS` and `BUDGET_TOKENS`). | Resolved (P3 M2) |

@@ -1,5 +1,7 @@
-# Gateways: reachable only from the agent namespace, and reach only the API
-# server (token reviews). Milestone 2 adds the model provider's API.
+# Gateways: reachable only from the agent namespace. The gateway reaches
+# the API server (token reviews) and the model provider: the in-cluster
+# mock, and api.anthropic.com by name and TLS server name (as the pypi
+# egress in P1). The mock reaches nothing.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -37,6 +39,53 @@ spec:
   - toEntities: [kube-apiserver]
     toPorts:
     - ports: [{port: "6443", protocol: TCP}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: llm-gateway-to-provider
+  namespace: gateways
+spec:
+  endpointSelector:
+    matchLabels: {app: llm-gateway}
+  egress:
+  - toEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: kube-system
+        k8s:k8s-app: kube-dns
+    toPorts:
+    - ports:
+      - {port: "53", protocol: UDP}
+      - {port: "53", protocol: TCP}
+      rules:
+        dns:
+        - matchName: mock-model.gateways.svc.cluster.local
+        - matchName: api.anthropic.com
+  - toEndpoints:
+    - matchLabels: {app: mock-model}
+    toPorts:
+    - ports: [{port: "8080", protocol: TCP}]
+  - toFQDNs:
+    - matchName: api.anthropic.com
+    toPorts:
+    - ports: [{port: "443", protocol: TCP}]
+      serverNames: [api.anthropic.com]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mock-model-from-gateway
+  namespace: gateways
+spec:
+  podSelector:
+    matchLabels: {app: mock-model}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: {app: llm-gateway}
+    ports:
+    - {port: 8080, protocol: TCP}
 ---
 # Agent side: every pod in the agent namespace may resolve the gateway's
 # name (and only that, through Cilium's DNS proxy) and connect to it.
