@@ -34,8 +34,10 @@ MAX_TIMEOUT_S = 60
 # and without it a fork bomb crashes the whole sandbox. The cap must fit the
 # memory budget too: each forked Python soon copies its pages, and gVisor
 # can't turn page-fault pressure from many processes into MemoryError. With
-# 256 MiB, an exponential bomb crashed the sandbox at 64 and was contained
-# at 32. The count includes the executor's own threads. 0 disables.
+# 256 MiB under systrap, an exponential bomb crashed the sandbox at 64 and
+# was contained at 32; under the KVM platform each guest process costs
+# ~4.5 MiB of host memory, so the template's limit is 384 MiB. The count
+# includes the executor's own threads. 0 disables.
 MAX_PROCS = int(os.environ.get("EXECUTOR_MAX_PROCS", "32"))
 # Address-space cap per user-code process (RLIMIT_AS), so one big allocation
 # fails with MemoryError. Without it, going over the pod memory limit kills

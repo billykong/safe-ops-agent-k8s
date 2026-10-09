@@ -48,7 +48,7 @@ if child:
 print(f"root forked {kids}, fork failures {fails}")
 """, 15),
 
-    ("memory-bomb", "Allocate and write 1 GiB (pod limit 256 MiB)", """
+    ("memory-bomb", "Allocate and write 1 GiB (pod limit 384 MiB)", """
 chunks = []
 try:
     for _ in range(32):

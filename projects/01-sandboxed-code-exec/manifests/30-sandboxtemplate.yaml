@@ -52,9 +52,14 @@ spec:
           readOnlyRootFilesystem: true
           capabilities:
             drop: ["ALL"]
+        # Memory sized for gVisor's KVM platform (cluster/runsc.toml): an
+        # idle sandbox uses ~135 MiB and each guest process ~4.5 MiB more.
+        # 384 MiB holds the executor's worst cases, one 192 MB allocation
+        # or 32 processes, so they fail inside the sandbox instead of
+        # OOM-killing it. (256 MiB sufficed under systrap.)
         resources:
-          requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 64Mi}
-          limits: {cpu: 500m, memory: 256Mi, ephemeral-storage: 128Mi}
+          requests: {cpu: 100m, memory: 160Mi, ephemeral-storage: 64Mi}
+          limits: {cpu: 500m, memory: 384Mi, ephemeral-storage: 128Mi}
         volumeMounts:
         - name: scratch
           mountPath: /tmp

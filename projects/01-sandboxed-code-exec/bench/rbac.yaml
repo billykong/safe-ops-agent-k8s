@@ -1,12 +1,25 @@
 # Benchmark-only identity, applied and deleted by scripts/bench.sh (never by
-# `make p1`). Broader than the agent's: it creates Sandboxes directly, to time
+# `make p1`). Broader than an agent's: it creates Sandboxes directly, to time
 # cold starts and to build a runc twin of the gVisor template for overhead
-# comparisons. The agent's admission policy doesn't match this account.
+# comparisons.
+#
+# It lives in its own namespace, not in `agent`: every service account in
+# the agent namespace is treated as an agent (write guard, claim policy,
+# kill switch; P3 milestone 1), and this one isn't. A run-scoped rule lets
+# it reach the executors, as the agents can.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bench
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: bench
-  namespace: agent
+  namespace: bench
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -32,8 +45,29 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: bench
-  namespace: agent
+  namespace: bench
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: bench
+---
+# For the run only: the bench client may call the executor, like an agent.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-executor-from-bench
+  namespace: sandboxes
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: bench
+      podSelector:
+        matchLabels:
+          app: bench-client
+    ports:
+    - port: 8888
+      protocol: TCP
