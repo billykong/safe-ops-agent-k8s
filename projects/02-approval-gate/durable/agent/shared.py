@@ -63,3 +63,53 @@ class Outcome:
     waited_seconds: float
     polls: int
     runs: Optional[int] = None
+
+
+@dataclass
+class Goal:
+    """A task for the model-driven agent (P3 milestone 2). The operator
+    fixes the target; the model only chooses what to do to it. `name`
+    becomes the ChangeRequest's name if the model proposes a change."""
+    name: str
+    instruction: str
+    target_namespace: str = "workloads"
+    target_name: str = "web"
+    approval_window_seconds: int = 3600
+
+
+@dataclass
+class Observation:
+    """The target as the agent read it from the cluster."""
+    exists: bool
+    replicas: int = 0
+    ready_replicas: int = 0
+    generation: int = 0
+    restarted_at: str = ""
+
+
+@dataclass
+class DecideRequest:
+    goal: Goal
+    observation: Observation
+
+
+@dataclass
+class ModelDecision:
+    """What the model chose, validated: ScaleDeployment, RestartDeployment
+    or Escalate. `detail` says why it escalated when the model didn't
+    choose to (unavailable, refused, out of budget, invalid output)."""
+    action: str
+    reason: str
+    replicas: Optional[int] = None
+    detail: str = ""
+    model: str = ""
+    request_id: str = ""
+
+
+@dataclass
+class AgentOutcome:
+    goal: str
+    action: str
+    reason: str
+    detail: str = ""
+    change: Optional[Outcome] = None

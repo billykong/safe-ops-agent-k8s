@@ -1,0 +1,5 @@
+# The mock model provider, for tests. Built on the host like the gateway.
+FROM gcr.io/distroless/static:nonroot
+COPY bin/mockmodel /mockmodel
+USER 65532:65532
+ENTRYPOINT ["/mockmodel"]

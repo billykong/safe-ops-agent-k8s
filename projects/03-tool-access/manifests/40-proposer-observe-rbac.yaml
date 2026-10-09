@@ -1,0 +1,21 @@
+# The model-driven proposer reads the Deployment it was asked about, to
+# give the model the facts (P3 milestone 2). Read only, one namespace; the
+# write guard is unaffected (it covers writes).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deployment-reader
+  namespace: workloads
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: proposer-deployment-reader
+  namespace: workloads
+subjects:
+- {kind: ServiceAccount, name: proposer, namespace: agent}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: deployment-reader}

@@ -1,6 +1,9 @@
-# The LLM gateway (P3-02). Milestone 1: the authentication front door only
-# (GET /whoami). Accepts pod-bound tokens for audience
-# llm-gateway.safe-ops.io from the listed agent identities.
+# The LLM gateway (P3-02, P3-03): POST /v1/messages for the listed agent
+# identities, authenticated by pod-bound tokens for audience
+# llm-gateway.safe-ops.io; requests checked against policy and each
+# identity's token budget; sent upstream with the provider key, which only
+# this pod mounts. Upstream is the in-cluster mock provider by default;
+# scripts/llm-gateway-mode.sh live switches to the real API and key.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,6 +18,9 @@ spec:
       labels: {app: llm-gateway}
     spec:
       serviceAccountName: llm-gateway
+      # Cilium's DNS proxy answers only the upstream names (30-networkpolicy).
+      dnsConfig:
+        options: [{name: ndots, value: "1"}]
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
@@ -31,6 +37,19 @@ spec:
         # How long a token review is reused: the most a revoked identity
         # can still get through after the kill switch.
         - {name: REVIEW_CACHE_TTL, value: 10s}
+        # What may be sent: one model, bounded output, the refusal-fallback
+        # beta only.
+        - {name: MODELS, value: claude-opus-5-5}
+        - {name: MAX_TOKENS_CAP, value: "16000"}
+        - {name: BETAS, value: server-side-fallback-2026-07-01}
+        - {name: FALLBACKS, value: default}
+        # Per identity: tokens per rolling window, and requests per minute.
+        - {name: BUDGET_TOKENS, value: "200000"}
+        - {name: BUDGET_WINDOW, value: 1h}
+        - {name: REQUESTS_PER_MINUTE, value: "30"}
+        - {name: UPSTREAM_URL, value: "http://mock-model.gateways.svc.cluster.local:8080"}
+        - {name: UPSTREAM_TIMEOUT, value: 60s}
+        - {name: API_KEY_FILE, value: /var/run/secrets/safe-ops.io/upstream/api-key}
         ports:
         - {name: http, containerPort: 8080}
         securityContext:
@@ -42,9 +61,17 @@ spec:
           limits: {cpu: 200m, memory: 64Mi}
         volumeMounts:
         - {name: kube-api, mountPath: /var/run/secrets/kubernetes.io/serviceaccount, readOnly: true}
+        - {name: provider-key, mountPath: /var/run/secrets/safe-ops.io/upstream, readOnly: true}
       # API token projected explicitly for an hour; the automounted one is
       # valid for a year on this cluster (P3 README finding 2).
       volumes:
+      # The provider key: mock-provider-key (make p3) or anthropic-api-key
+      # (created by you, then scripts/llm-gateway-mode.sh live). Mounted
+      # here only; the agents can't read Secrets in this namespace.
+      - name: provider-key
+        secret:
+          secretName: mock-provider-key
+          items: [{key: api-key, path: api-key}]
       - name: kube-api
         projected:
           sources:
