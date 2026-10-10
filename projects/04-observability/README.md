@@ -7,7 +7,7 @@ Requirements and status: [docs/prd/projects/p4-observability-evals.md](../../doc
 
 ## Milestones
 1. [x] OpenTelemetry GenAI traces; Prometheus and Grafana for tokens, cost and escalation rate. `make p4 test-observability`: 62 checks, 1 known gap ([GAP-06](../../docs/known-gaps.md#gap-06-the-collector-cant-tell-who-sent-a-span))
-2. [ ] API audit logging to a store the agent can't write to
+2. [x] API audit logging to a store the agent can't write to. `make audit test-audit`: 75 checks, 1 known gap ([GAP-07](../../docs/known-gaps.md#gap-07-a-long-audit-sink-outage-loses-events-from-the-sink))
 3. [ ] Replay eval suite as Jobs or Argo Workflows; blind judge plus deterministic checks
 4. [ ] Regression gate on merges (CI)
 5. [ ] Oversight and safety metrics; kill-switch test in the suite
@@ -87,6 +87,57 @@ Grafana, Jaeger and Prometheus are reached by port-forward (`scripts/observabili
 
 **Cost is an estimate.** `PRICES` in the LLM gateway's manifest holds the USD per million input and output tokens for each model. The value shipped (`claude-opus-5-5=5:25`) is a placeholder that hasn't been checked against the current price list; set it from the provider's pricing page. Cache writes and reads default to 1.25x and 0.1x the input price.
 
+## The API audit log (milestone 2)
+
+```mermaid
+flowchart LR
+  A["agent-worker<br/>(proposer token)"] -- "API requests" --> K["kube-apiserver<br/>audit policy"]
+  H["humans, controllers"] --> K
+  K -- "webhook, batches, mTLS<br/>10.96.0.200:8443" --> S["audit-sink<br/>(namespace audit)"]
+  K -- "root-only file" --> N[("node: /var/log/kubernetes/audit")]
+  S -- append + fsync --> V[("hash chain<br/>retained volume")]
+  P["Prometheus"] -- "scrape :9090" --> S
+  P -- "apiserver_audit_*" --> K
+```
+
+**What's recorded** (`audit/policy.yaml`, first matching rule wins):
+- everything the agents do (every identity in namespace `agent`). Writes are kept in full, request and response. Reads and refusals are kept as metadata (who, what, the answer). For the agents' secrets and tokens, only metadata;
+- changes by anyone to what guards the agent, with the request body: admission configuration, RBAC, network policies, CRDs, the approval records and policy, and the kill switch;
+- who changed anything in the namespaces the agent works in or with, every write by a cluster admin, and every exec, attach and port-forward;
+- nothing else: leases, events, endpoints, the kubelets, and the components' token and access reviews (one per gateway request and per authenticated scrape) are dropped.
+
+**The agent's identity.** Its pod-bound token puts more than the service account in each event: `user.extra` names the pod, the node and the token's id (JTI). The ChangeRequest the agent creates is recorded with its body, so its `traceparent` annotation ties the API record to the task's trace. The suite runs a real task and finds its proposal in the sink under `system:serviceaccount:agent:proposer`, with the worker pod's name, the trace id, and the same `auditID` in the node's log.
+
+**Where it goes.** The API server writes two copies:
+- **The sink.** A webhook, in batches at most 2s apart, to `audit-sink` (`audit-sink/`, Go). The sink takes only the API server's client certificate, from a CA made for this link whose key is discarded after issuing it (`scripts/audit-setup.sh`). It appends each batch to a hash chain and fsyncs before answering, so a 200 means stored. Each line holds the event, its sequence number, the previous line's hash and its own: an edit, removal or reorder breaks every hash after it. The volume's StorageClass retains it if the claim or namespace is deleted.
+- **The node.** A root-only file (`/var/log/kubernetes/audit/audit.log`), rotated at 100 MB x 5, which has every event even when the sink is down.
+
+**Why the agent can't write to it or delete it:**
+- **RBAC.** The agent has nothing in namespace `audit`, and nothing cluster-wide that touches it: no volumes, no StorageClasses, no node proxy, no impersonation. The suite asks with its real token, gets 403 each time, and finds each refusal recorded.
+- **Network.** No pod can reach the sink: its webhook port admits only traffic from outside the pod network, and its metrics port only Prometheus.
+- **Authentication.** A connection that does get through needs the API server's client certificate. Without one, or with a self-made one, the handshake fails.
+- **No way to edit.** The sink has no API to read, change or delete entries. Reading is `kubectl exec ... /audit-sink cat`, which only cluster admins can run, and is itself audited.
+
+**Detecting tampering.** The sink re-reads its file every 30s and compares it with what it wrote: every line must verify, and the chain must reach the count and head it last wrote. That catches lines cut off the end too, which a fresh `audit-sink verify` alone can't. It reports the result as `safeops_audit_chain_verified` and logs the head whenever it moves, so the pod's log is a record outside the volume. The suite flips one byte of the agent's event on the node's disk; the chain breaks at that line, the sink logs it, and `AuditChainBroken` fires. Restoring the byte restores it.
+
+**Alerts** (Prometheus rules; no Alertmanager here, so they show in Prometheus):
+
+| Alert | When |
+| --- | --- |
+| `AdmissionConfigChanged` | anyone changed an admission policy, binding or webhook (GAP-02's detection) |
+| `GuardConfigChanged` | RBAC, a network policy or the kill switch changed |
+| `AgentRequestForbidden` | the API server refused the agent: a bug, or an injected instruction trying |
+| `AuditChainBroken` | the chain on disk doesn't match what the sink wrote |
+| `AuditEventsDropped` | the API server gave up delivering events to the sink (GAP-07) |
+| `AuditSinkDown` | the sink is unreachable for 2 minutes |
+
+The dashboard's "API audit" row shows the same: refusals, admission and guard changes, dropped events, the chain's state and size, and requests by actor and outcome.
+
+**What it doesn't cover:**
+- **The audit store lives in the cluster it audits.** A cluster admin or root on the node can stop the sink, delete the volume, or rewrite the whole chain consistently and restart the sink. The chain shows edits relative to a record kept elsewhere: the sink's own state while it runs, the head lines in its log, and Prometheus's history of `safeops_audit_chain_entries`. Write-once storage outside the cluster (object storage with a retention lock) would close it.
+- **Events the policy doesn't record don't exist.** The agent's requests are all recorded, but most system traffic isn't.
+- **An outage longer than the API server's retries** loses events from the sink; the node keeps them (GAP-07).
+
 ## Findings
 1. **Jaeger 2.21 removed the v1 HTTP query API, which Grafana's Jaeger datasource still uses.** `/api/services` and `/api/traces?service=` answer 404 (jaeger#9260, "remove v1 http endpoints the ui no longer calls"), so Grafana's datasource health check and trace search failed. Pinned 2.20.0; Jaeger's own v3 API (`/api/v3/traces/{id}`) works on both and is what the suite uses.
 2. **An OTTL allowlist that silently did nothing.** The collector's transform had the span statement and the span-event statement in one group. OTTL infers one context per group, the narrowest, span event, so `keep_matching_keys(span.attributes, ...)` ran only on spans with events, and most spans kept every attribute. It showed up as a key that wasn't on the allowlist (`jsonrpc.request.id`, from the MCP SDK's spans) appearing in Jaeger. One group per context fixed it, and the suite now sends content straight to the collector to prove it's stripped.
@@ -101,7 +152,22 @@ Grafana, Jaeger and Prometheus are reached by port-forward (`scripts/observabili
 
 11. **The collector believes whoever sends it a span (GAP-06).** Network policy decides who may send, but a span's service is what its sender says. From the agent's pod, a span claiming to be `llm-gateway` was stored as the gateway's. Traces stay a debugging aid; the numbers that matter are scraped from the components that enforce.
 
+Milestone 2:
+
+12. **The API server's traffic reaches pods as "world".** Its webhook calls to the sink arrive from the node's `cilium_host` address, which Cilium classifies as `world`, not `host` or `kube-apiserver`, the same as the kubelet's probes (P2's Temporal finding). A CIDR rule can't name a cluster address either. The webhook port therefore admits `world`. That admits no pod, since every pod has its own identity, and the client certificate is what keeps writers out. The sink's readiness probe is an exec (`audit-sink health`) for the same reason.
+13. **The API server can't use cluster DNS.** It runs on the node's network with the node's resolver, so the webhook config names the sink by a fixed ClusterIP (10.96.0.200, from the range's static band). Cilium translates it in the node's namespace.
+14. **Audit rules match the authenticated user, not the impersonated one.** A request made with `kubectl --as=system:serviceaccount:agent:proposer` falls through the agents' rules (it's the admin's request), and wasn't recorded until a rule for cluster admins' writes was added. The suite acts as the agent with the worker's real token instead (`scripts/kube_probe.py`). That token also carries the pod, node and token id into the event, which impersonation can't.
+15. **Token reviews are bearer tokens.** A TokenReview's request body is the token being checked. Every gateway request and every authenticated scrape makes one, so they're noise as well as a leak. The policy drops them for components and keeps only metadata for the agent's own. The suite checks no JWT appears in either copy.
+16. **The API server retries a failed batch for about 45 seconds, then drops it** (GAP-07). Restarts are covered: the suite stops the sink, has the agent make a request, and finds it in the chain once the sink is back. Past the retries, the drop shows only in `apiserver_audit_error_total{plugin="webhook"}`, so Prometheus now scrapes the API server's audit counters (with the token and role it already had) and alerts on them.
+17. **A shortened chain is still a valid chain.** Edits break hashes, but cutting lines off the end leaves a consistent prefix. Detecting it needs a record kept outside the file: the running sink compares disk with what it wrote, logs the head, and exports the count.
+18. **`encoding/json` HTML-escapes `<`, `>` and `&` inside a `json.RawMessage` when marshalling.** Writing chain lines with it would have stored different bytes from the ones hashed, so the sink writes lines by hand.
+19. **The kubelet reads every file in the manifests directory as a static pod.** A backup or staging copy of `kube-apiserver.yaml` there would be another API server pod for it to run. The setup script stages and backs up in `/etc/kubernetes/audit`, then moves the file in. The API server reads its audit policy only at start, so the script puts a hash of the policy, webhook config and certificates in a pod annotation: a change to any of them changes the manifest and restarts it.
+
 ## Layout
+`audit/`: the audit policy, the API server's webhook config, and the sink's namespace, Deployment, volume and network policy (`audit/manifests/`, applied by `scripts/audit-setup.sh`).
+
+`audit-sink/`: the sink (Go): `internal/chain` is the hash chain, `internal/events` maps events to bounded metric labels.
+
 `manifests/`:
 - the namespace;
 - the collector with its allowlist;
@@ -120,6 +186,10 @@ The instrumentation lives with each component:
 make p2 p3 durable               # the senders, instrumented: controller, gateways, agent
 make p4                          # collector, Jaeger, Prometheus, Grafana (either order works)
 make test-observability          # 62 checks + GAP-06: one trace per task, no content, tokens/cost/escalation, access
+make audit                       # the audit sink, certificates, and the API server's audit flags (restarts it)
+make test-audit                  # 75 checks + GAP-07: agent identity, refusals, tampering, alerts, delivery
+kubectl exec -n audit deploy/audit-sink -- /audit-sink verify       # ok entries=N head=...
+kubectl exec -n audit deploy/audit-sink -- /audit-sink cat | python3 scripts/audit_events.py --where 'user>username=system:serviceaccount:agent:proposer' --print verb --print 'objectRef>resource' --print 'responseStatus>code'
 scripts/agent-task.sh demo-1 web "Look into incident INC-1001 and fix it."   # prints the trace id
 scripts/observability.sh         # Grafana :3000, Jaeger :16686, Prometheus :9090 until Ctrl-C
 ```

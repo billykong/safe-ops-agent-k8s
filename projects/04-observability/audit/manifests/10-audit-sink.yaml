@@ -1,0 +1,115 @@
+# The audit sink: receives the API server's audit events (webhook backend,
+# mTLS) and appends them to a hash chain on its own volume. Its serving
+# certificate and the CA of the API server's client certificate are in
+# Secret audit-sink-tls, created by scripts/audit-setup.sh.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: audit-chain
+  namespace: audit
+spec:
+  storageClassName: audit-retain
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 1Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-sink
+  namespace: audit
+spec:
+  replicas: 1
+  # One writer per chain.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: audit-sink}
+  template:
+    metadata:
+      labels: {app: audit-sink}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: sink
+        image: audit-sink:dev
+        imagePullPolicy: Never
+        args: [serve, --log=/data/audit.jsonl]
+        ports:
+        - {name: webhook, containerPort: 8443}
+        - {name: metrics, containerPort: 9090}
+        # An exec probe: the kubelet's own probes reach pods as "world"
+        # under this Cilium setup, and the default-deny drops them.
+        readinessProbe:
+          exec: {command: [/audit-sink, health]}
+          periodSeconds: 5
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        resources:
+          requests: {cpu: 20m, memory: 32Mi}
+          limits: {cpu: 500m, memory: 256Mi}
+        volumeMounts:
+        - {name: data, mountPath: /data}
+        - {name: tls, mountPath: /tls, readOnly: true}
+      volumes:
+      - name: data
+        persistentVolumeClaim: {claimName: audit-chain}
+      - name: tls
+        secret: {secretName: audit-sink-tls, defaultMode: 0440}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audit-sink
+  namespace: audit
+spec:
+  selector: {app: audit-sink}
+  # Fixed: the API server's webhook config names this address (it can't
+  # use cluster DNS). From the range's static band, below dynamic
+  # allocations.
+  clusterIP: 10.96.0.200
+  ports:
+  - {name: webhook, port: 8443, targetPort: webhook}
+  - {name: metrics, port: 9090, targetPort: metrics}
+---
+# Default deny both ways; the sink needs no egress at all.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: audit
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# The webhook from the API server only; the metrics port from Prometheus.
+#
+# The API server's connections, like the kubelet's probes, reach pods from
+# the node's cilium_host address classified as "world", not "host" or
+# "kube-apiserver", and a CIDR rule can't name a cluster address. So the
+# webhook port admits "world": no pod (every pod has its own identity),
+# only the node and whatever outside the cluster can route to a pod
+# address. The client certificate is what keeps writers out: only the API
+# server holds one the sink accepts.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: audit-sink-ingress
+  namespace: audit
+spec:
+  endpointSelector:
+    matchLabels: {app: audit-sink}
+  ingress:
+  - fromEntities: [kube-apiserver, world]
+    toPorts: [{ports: [{port: "8443", protocol: TCP}]}]
+  - fromEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: observability, app: prometheus}
+    toPorts: [{ports: [{port: "9090", protocol: TCP}]}]

@@ -1,0 +1,21 @@
+# audit: where the API server's audit events are kept (P4-04). Only the API
+# server writes here, through the sink's webhook with its own client
+# certificate; Prometheus reads the sink's counters. No identity outside
+# cluster-admin has RBAC in this namespace, and the agent has none at all.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: audit
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+# The chain's volume outlives its claim: deleting the claim, or the whole
+# namespace, leaves the data on the node for someone to look at.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: audit-retain
+provisioner: rancher.io/local-path
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer

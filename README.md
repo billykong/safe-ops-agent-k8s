@@ -13,7 +13,7 @@ The plan and requirements live in [docs/prd/](docs/prd/README.md). Weaknesses we
 | `projects/01-sandboxed-code-exec/` | agent-sandbox + gVisor, hardened sandbox pods, warm-pool latency |
 | `projects/03-tool-access/` | Workload identity per agent; the LLM gateway holding the model key, with per-agent budgets; MCP tools behind a gateway with pinned descriptors and argument rules; the prompt-injection red-team ([docs/red-team.md](docs/red-team.md)) |
 | `projects/02-approval-gate/` | `ChangeRequest` CRD and approval controller (kubebuilder): the agent proposes, a human approves, the controller applies |
-| `projects/04-observability/` | OpenTelemetry GenAI traces (one per task, no content), Prometheus and Grafana for tokens, cost and escalation rate |
+| `projects/04-observability/` | OpenTelemetry GenAI traces (one per task, no content), Prometheus and Grafana for tokens, cost and escalation rate; the API audit log, in a hash-chained store the agent can't reach |
 | `docs/prd/` | Product requirements: goals, architecture, security requirements, roadmap, and per-project requirements with status |
 
 Project 5 (local inference) gets its own folder when it starts.
@@ -43,6 +43,7 @@ make test-policy               # semantic action gate (embedded OPA): allow/esca
 make red-team                  # prompt injection and exfiltration: which layer stops each attack
 make p4 test-observability     # telemetry: one trace per task, tokens, cost, escalation rate
 scripts/observability.sh       # Grafana, Jaeger, Prometheus on localhost
+make audit test-audit          # API audit log: the agent's identity, tamper-evident sink, alerts (restarts the API server)
 ./scripts/kill-switch.sh stop --reason TEXT   # runbook: docs/runbooks/kill-switch.md
 ./scripts/new-approver.sh NAME # issue an approver certificate; then approvalctl with that kubeconfig
 ```

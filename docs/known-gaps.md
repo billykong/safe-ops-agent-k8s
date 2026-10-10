@@ -10,6 +10,7 @@ Weaknesses we know about, have reproduced, and haven't closed yet. Each has an I
 | [GAP-04](#gap-04-agent-to-gateway-traffic-is-plaintext) | Agent-to-gateway traffic is plaintext | Low on one node; Medium on multi-node clusters | Open | [P3-24](prd/projects/p3-tool-identity-policy.md) |
 | [GAP-05](#gap-05-narrow-channels-through-allowed-tool-arguments) | Narrow channels through allowed tool arguments | Low (about 20 bits a call, to the incident tracker only) | Open (accepted) | [P3-31](prd/projects/p3-tool-identity-policy.md) |
 | [GAP-06](#gap-06-the-collector-cant-tell-who-sent-a-span) | The collector can't tell who sent a span | Low (traces are a debugging aid; the numbers that matter are scraped from the gateways and controller) | Open | [P4-01](prd/projects/p4-observability-evals.md) |
+| [GAP-07](#gap-07-a-long-audit-sink-outage-loses-events-from-the-sink) | A long audit sink outage loses events from the sink | Low (the node's log keeps them, and the drop alerts) | Open | [P4-04](prd/projects/p4-observability-evals.md) |
 
 ## GAP-01: domain fronting through the PyPI egress allowlist
 
@@ -80,13 +81,13 @@ None while the agent has no RBAC on admission configuration, impersonation, esca
 | Option | Closes it? | Cost |
 | --- | --- | --- |
 | Keep those permissions away from the agent, and test it on every run | Keeps it closed in practice | Already done; relies on RBAC hygiene |
-| Alert on changes to admission configuration (API audit log to an agent-unwritable store, P4) | Detects, doesn't prevent | Audit pipeline |
+| Alert on changes to admission configuration (API audit log to an agent-unwritable store) | Detects, doesn't prevent | **Done** in P4 milestone 2: alert `AdmissionConfigChanged`, `make test-audit` |
 | Manage admission configuration with GitOps reconciliation (re-applied within minutes) | Shrinks the window | A reconciler with its own privileges |
 | Out-of-cluster enforcement (e.g. an API proxy in front of the agent) | Yes, for the agent's traffic | Another component in the agent's path |
 
 ### Status
 
-Open, inherent to in-cluster admission control. Mitigated by keeping and testing the RBAC exclusions.
+Open, inherent to in-cluster admission control. Mitigated by keeping and testing the RBAC exclusions, and detected: since P4 milestone 2 every change to admission configuration is in the API audit log and raises `AdmissionConfigChanged` (`make test-audit`).
 
 ## GAP-03: Temporal's frontend has no authentication
 
@@ -189,4 +190,33 @@ The agent's own metrics (tasks, escalations, model calls) can be inflated the sa
 
 ### Status
 
-Open. Revisit before traces are used for anything but debugging, such as audit (milestone 2) or evals (milestone 3).
+Open. The audit log (milestone 2) doesn't rely on traces: its events come from the API server, over mTLS, and a ChangeRequest's audit event names the trace only as a pointer. Revisit before traces are used for evals (milestone 3).
+
+## GAP-07: a long audit sink outage loses events from the sink
+
+**Found:** 2026-10-10, P4 milestone 2. **Reproduced by:** `make test-audit`, section "A long sink outage", reported as `GAP GAP-07`.
+
+### What's wrong
+
+The API server sends audit events to the sink in batches (webhook backend, batch mode). A batch that fails is retried with backoff, starting at 5s (`--audit-webhook-initial-backoff`), for about 45 seconds in all, and then dropped from the webhook path: the API server logs `Error in audit plugin 'webhook' affecting N audit events` and counts them in `apiserver_audit_error_total{plugin="webhook"}`. With the sink down for longer than that (a node drain, a stuck volume, a crash loop), the events of that window never reach the chain. The suite stops the sink, has the agent make a request, and finds it in the node's log but not in the sink.
+
+Anyone able to stop the sink can open such a window. The agent can't: it has no RBAC in namespace `audit` and no route to the sink.
+
+### Impact
+
+The audit record is complete only in the node's log (`/var/log/kubernetes/audit/audit.log`, root-only, rotated at 100 MB x 5), which isn't hash-chained or shipped anywhere. The sink's chain is complete except for the outage window, and the gap is visible:
+- `AuditEventsDropped` alerts on any drop;
+- `AuditSinkDown` alerts after two minutes down.
+
+### Options
+
+| Option | Closes it? | Cost |
+| --- | --- | --- |
+| `--audit-webhook-mode=blocking-strict`: a request isn't served until its event is stored | Yes | The sink becomes part of the API server's availability: sink down, cluster read-only and then down |
+| A shipper (Fluent Bit or Vector DaemonSet) tails the node's log with a position file and forwards to the sink, deduplicating by `auditID` | Yes, for outages shorter than log rotation | A privileged pod with a hostPath mount of the audit directory, on every control-plane node |
+| More sink replicas behind the Service, each writing its own chain | Shrinks it (restarts, one-pod failures) | Several chains to verify and merge |
+| Accept: rely on the node's log and the alert for the window | No | None |
+
+### Status
+
+Open. Revisit when the audit log feeds anything automated (evals, P4 milestone 3), or before running on a multi-node control plane.

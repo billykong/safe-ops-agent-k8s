@@ -7,6 +7,10 @@
 # authorizes each scrape (TokenReview, SubjectAccessReview), and this
 # identity may get /metrics and nothing else. The gateways' metrics are
 # on a port that only this pod may reach (network policy).
+#
+# The alerting rules (alerts.yml) watch the audit sink's counters (P4-04).
+# There's no Alertmanager here: alerts show in Prometheus's alerts page
+# and API.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -42,6 +46,7 @@ data:
       evaluation_interval: 15s
     otlp:
       translation_strategy: UnderscoreEscapingWithSuffixes
+    rule_files: [/etc/prometheus/alerts.yml]
     scrape_configs:
     - job_name: llm-gateway
       static_configs: [{targets: [llm-gateway.gateways.svc.cluster.local:9090]}]
@@ -54,6 +59,59 @@ data:
       authorization:
         credentials_file: /var/run/secrets/safe-ops.io/prometheus/token
       static_configs: [{targets: [approval-controller-metrics.approval-system.svc.cluster.local:8443]}]
+    - job_name: audit-sink
+      static_configs: [{targets: [audit-sink.audit.svc.cluster.local:9090]}]
+    # The API server's own audit counters: events it gave up delivering to
+    # the sink (P4-04). Same token and role as the controller's metrics.
+    - job_name: kube-apiserver
+      scheme: https
+      tls_config: {ca_file: /var/run/secrets/safe-ops.io/prometheus/ca.crt}
+      authorization:
+        credentials_file: /var/run/secrets/safe-ops.io/prometheus/token
+      static_configs: [{targets: [kubernetes.default.svc.cluster.local:443]}]
+      metric_relabel_configs:
+      - {source_labels: [__name__], regex: "apiserver_audit_.*", action: keep}
+  alerts.yml: |
+    groups:
+    - name: safe-ops-audit
+      rules:
+      # GAP-02: in-cluster admission control can be removed by whoever may
+      # edit it. Detect it: any change to admission configuration pages.
+      - alert: AdmissionConfigChanged
+        expr: sum by (resource, actor) (increase(safeops_audit_changes_total{resource=~"(validating|mutating)(webhookconfigurations|admissionpolicies|admissionpolicybindings)"}[15m])) > 0
+        labels: {severity: page}
+        annotations:
+          summary: "{{ $labels.actor }} changed {{ $labels.resource }}: check the audit log"
+      - alert: GuardConfigChanged
+        expr: sum by (resource, actor) (increase(safeops_audit_changes_total{resource=~"roles|rolebindings|clusterroles|clusterrolebindings|networkpolicies|ciliumnetworkpolicies|ciliumclusterwidenetworkpolicies|kill-switch"}[15m])) > 0
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $labels.actor }} changed {{ $labels.resource }}"
+      # The agent asked the API server for something its RBAC doesn't
+      # allow: a bug, or an injected instruction trying.
+      - alert: AgentRequestForbidden
+        expr: sum(increase(safeops_audit_events_total{actor="agent",outcome="forbidden"}[15m])) > 0
+        labels: {severity: ticket}
+        annotations:
+          summary: "the agent was refused by the API server {{ $value | humanize }} times in 15m"
+      - alert: AuditChainBroken
+        expr: safeops_audit_chain_verified == 0
+        labels: {severity: page}
+        annotations:
+          summary: "the audit chain on disk doesn't match what the sink wrote: edited or cut"
+      # The API server retries a failed batch for about 45s, then drops it
+      # from the webhook; those events are only in the node's log (GAP-07).
+      - alert: AuditEventsDropped
+        expr: sum(increase(apiserver_audit_error_total{plugin="webhook"}[15m])) > 0
+        labels: {severity: page}
+        annotations:
+          summary: "{{ $value | humanize }} audit events didn't reach the sink; the node's log has them"
+      - alert: AuditSinkDown
+        expr: up{job="audit-sink"} == 0 or absent(up{job="audit-sink"})
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "the audit sink is down; events reach only the node's log"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -106,12 +164,14 @@ spec:
         configMap: {name: prometheus}
       - name: data
         emptyDir: {sizeLimit: 2Gi}
-      # For the controller's metrics endpoint: the API server's audience
-      # (it runs a TokenReview), an hour, refreshed by the kubelet.
+      # For the controller's and the API server's metrics: the API
+      # server's audience (the controller runs a TokenReview), an hour,
+      # refreshed by the kubelet; and the cluster CA for the API server.
       - name: token
         projected:
           sources:
           - serviceAccountToken: {expirationSeconds: 3600, path: token}
+          - configMap: {name: kube-root-ca.crt, items: [{key: ca.crt, path: ca.crt}]}
 ---
 apiVersion: v1
 kind: Service

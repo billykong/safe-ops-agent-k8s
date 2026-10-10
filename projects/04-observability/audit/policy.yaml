@@ -1,0 +1,78 @@
+# The API server's audit policy (P4-04, SEC-36). The first matching rule
+# decides each request's level. Copied into the node by
+# scripts/audit-setup.sh; the API server reads it only at start, and the
+# script restarts it when this file changes.
+#
+# What it records:
+# - everything the agents do (every identity in namespace agent): writes
+#   with request and response, reads as metadata;
+# - changes, by anyone, to what guards the agent: admission, RBAC,
+#   network policy, CRDs, the approval records and policy, the kill switch;
+# - who changed anything in the namespaces the agent works in or with,
+#   and every write by a cluster admin (metadata only); every exec,
+#   attach and port-forward.
+# Never the content of secrets or tokens, for anyone: only the agents'
+# writes and changes to guard configuration log bodies, and neither
+# covers them.
+apiVersion: audit.k8s.io/v1
+kind: Policy
+# RequestReceived duplicates the final stage; managed fields are noise.
+omitStages: [RequestReceived]
+omitManagedFields: true
+rules:
+# The agents' secrets, token requests and token reviews: who and when,
+# never the body (a token review's request is a bearer token, a token
+# request's response is one). No rule below logs a body for these.
+- level: Metadata
+  userGroups: ["system:serviceaccounts:agent"]
+  resources:
+  - {group: "", resources: [secrets, serviceaccounts/token]}
+  - {group: authentication.k8s.io, resources: [tokenreviews]}
+# The agents' writes, in full: the ChangeRequest it proposed, with its
+# traceparent annotation, which ties the audit event to the task's trace.
+- level: RequestResponse
+  userGroups: ["system:serviceaccounts:agent"]
+  verbs: [create, update, patch, delete, deletecollection]
+# The agents' reads and everything else they try: who looked at what, and
+# what they were refused.
+- level: Metadata
+  userGroups: ["system:serviceaccounts:agent"]
+# Noise below this line: leader-election leases, events, endpoints, the
+# kubelets, and the components' authentication and authorization checks
+# (one per gateway request and per authenticated scrape).
+- level: None
+  resources:
+  - {group: coordination.k8s.io, resources: [leases]}
+  - {group: "", resources: [events, endpoints]}
+  - {group: events.k8s.io}
+  - {group: discovery.k8s.io, resources: [endpointslices]}
+  - {group: authentication.k8s.io, resources: [tokenreviews]}
+  - {group: authorization.k8s.io}
+- level: None
+  userGroups: ["system:nodes"]
+# What guards the agent, changed by anyone: the request (what it became).
+- level: Request
+  verbs: [create, update, patch, delete, deletecollection]
+  resources:
+  - {group: admissionregistration.k8s.io}
+  - {group: rbac.authorization.k8s.io}
+  - {group: networking.k8s.io, resources: [networkpolicies]}
+  - {group: cilium.io, resources: [ciliumnetworkpolicies, ciliumclusterwidenetworkpolicies]}
+  - {group: apiextensions.k8s.io}
+  - {group: approval.safe-ops.io}
+  - {group: "", resources: [configmaps], resourceNames: [agent-kill-switch, approval-policy]}
+# A shell or tunnel into any pod.
+- level: Metadata
+  resources:
+  - {group: "", resources: [pods/exec, pods/attach, pods/portforward, pods/ephemeralcontainers]}
+# Cluster admins' writes anywhere. Rules match the authenticated user, so
+# an admin acting as the agent (kubectl --as) is matched here, not by the
+# agents' rules; the event names both.
+- level: Metadata
+  verbs: [create, update, patch, delete, deletecollection]
+  userGroups: ["kubeadm:cluster-admins", "system:masters"]
+# Who changed what in the namespaces the agent works in or with.
+- level: Metadata
+  verbs: [create, update, patch, delete, deletecollection]
+  namespaces: [agent, sandboxes, approvals, approval-system, workloads, gateways, mcp-servers, observability, audit, temporal]
+- level: None

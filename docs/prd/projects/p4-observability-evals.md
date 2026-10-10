@@ -2,7 +2,7 @@
 
 **Goal:** what the agent does, what it costs and whether it's still safe are visible by default and checked continuously. Changes to the agent are gated on replayed evaluations. Covers goal G4.
 
-Status: **in progress**: milestone 1 (telemetry) done. Depends on P2 and P3; uses P5 for a local judge. Built in [projects/04-observability/](../../../projects/04-observability/README.md).
+Status: **in progress**: milestones 1 (telemetry) and 2 (API audit log) done. Depends on P2 and P3; uses P5 for a local judge. Built in [projects/04-observability/](../../../projects/04-observability/README.md).
 
 ## User stories
 
@@ -19,7 +19,7 @@ Status: **in progress**: milestone 1 (telemetry) done. Depends on P2 and P3; use
 | P4-01 | OpenTelemetry traces using the GenAI semantic conventions: a span per model call and tool call, with token counts. | Must | **Done** (M1): one trace per task from the starter through the workflow, `chat` and `execute_tool` spans at the agent and both gateways, and the controller's gate decision and outcome via the ChangeRequest's `traceparent` annotation; `make test-observability`. The collector can't authenticate senders ([GAP-06](../../known-gaps.md#gap-06-the-collector-cant-tell-who-sent-a-span)) |
 | P4-02 | Token and cost metrics, and escalation rate, exported to Prometheus with Grafana dashboards. | Must | **Done** (M1): tokens, estimated cost and request outcomes per identity from the LLM gateway; tool calls from the MCP gateway; gate decisions from the controller; the agent's decisions and escalations over OTLP; a provisioned dashboard with cost per task and escalation rates |
 | P4-03 | Trace content capture (prompts, tool outputs) off or redacted by default. | Must | **Done** (M1): off in every sender, and enforced by an attribute allowlist in the collector; the suite checks a canary in the instruction never reaches Jaeger and that content sent directly to the collector is stripped |
-| P4-04 | Kubernetes API audit logging captures the agent's identity, shipped to a store the agent can't write to or delete from. | Should | Planned |
+| P4-04 | Kubernetes API audit logging captures the agent's identity, shipped to a store the agent can't write to or delete from. | Should | **Done** (M2): the API server's audit policy records everything the agents do (writes in full) and every change to what guards them; events go over mTLS to a sink that appends them to a hash chain on a retained volume, plus a root-only log on the node. Events name the agent's service account and the pod, node and token id behind it, and a proposal's event carries its task's trace id. The agent has no RBAC in namespace `audit`, no route to the sink and no client certificate; an edit on disk breaks the chain and alerts. Changes to admission configuration alert (GAP-02); `make audit test-audit`. A sink outage over ~45s loses events from the sink, not the node's log ([GAP-07](../../known-gaps.md#gap-07-a-long-audit-sink-outage-loses-events-from-the-sink)) |
 
 ### Evals
 
