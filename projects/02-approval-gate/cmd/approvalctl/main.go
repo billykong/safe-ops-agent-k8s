@@ -238,6 +238,18 @@ func printPacket(out *os.File, cr *v1.ChangeRequest, budget string) {
 	} else {
 		row("review", "(not computed yet)")
 	}
+	if rv := st.Review; rv != nil && rv.Policy != nil {
+		for i, r := range append([]string{string(rv.Policy.Result)}, rv.Policy.Reasons...) {
+			k := ""
+			if i == 0 {
+				k = "policy"
+			}
+			if i > 0 {
+				r = "- " + r
+			}
+			row(k, r)
+		}
+	}
 	row("plan", st.Plan)
 	row("rollback plan", st.RollbackPlan)
 	if st.Review != nil {

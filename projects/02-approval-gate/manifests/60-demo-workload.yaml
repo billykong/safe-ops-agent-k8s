@@ -29,3 +29,69 @@ spec:
         resources:
           requests: {cpu: 10m, memory: 16Mi}
           limits: {cpu: 50m, memory: 32Mi}
+---
+# A critical service: the policy sends every change to a human, and denies scaling it to zero.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments
+  namespace: workloads
+  labels: {safe-ops.io/tier: critical}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: payments}
+  template:
+    metadata:
+      labels: {app: payments}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: payments
+        # Already in every kind node image; never pulled.
+        image: registry.k8s.io/pause:3.10
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        resources:
+          requests: {cpu: 10m, memory: 16Mi}
+          limits: {cpu: 50m, memory: 32Mi}
+---
+# A protected service: the policy denies any change through the agent pipeline.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger
+  namespace: workloads
+  labels: {safe-ops.io/protected: "true"}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: ledger}
+  template:
+    metadata:
+      labels: {app: ledger}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: ledger
+        # Already in every kind node image; never pulled.
+        image: registry.k8s.io/pause:3.10
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        resources:
+          requests: {cpu: 10m, memory: 16Mi}
+          limits: {cpu: 50m, memory: 32Mi}

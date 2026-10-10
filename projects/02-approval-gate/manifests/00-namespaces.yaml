@@ -25,3 +25,7 @@ metadata:
   labels:
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest
+    # Read by the semantic action gate (policy/gate.rego): the agent
+    # pipeline may change this namespace, up to this many replicas each.
+    safe-ops.io/agent-managed: "true"
+    safe-ops.io/max-replicas: "20"

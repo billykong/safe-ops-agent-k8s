@@ -27,6 +27,7 @@ import (
 
 	approvalv1alpha1 "github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/api/v1alpha1"
 	"github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/internal/controller"
+	"github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/internal/gate"
 	"github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/internal/oversight"
 	// +kubebuilder:scaffold:imports
 )
@@ -52,6 +53,8 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var secureMetrics bool
+	var policyFile string
+	flag.StringVar(&policyFile, "policy-file", "/etc/safe-ops/policy/gate.rego", "The semantic action gate's Rego policy.")
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -181,10 +184,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The semantic action gate's policy (P3-10). If it can't be loaded the
+	// controller still runs (cancellations, expiry), and every proposal is
+	// denied: fail closed.
+	g, err := gate.Load(context.Background(), policyFile)
+	if err != nil {
+		setupLog.Error(err, "no usable policy: every proposal will be denied", "file", policyFile)
+	} else {
+		setupLog.Info("policy loaded", "file", policyFile, "sha", g.SHA)
+	}
 	if err := (&controller.ChangeRequestReconciler{
 		Client: mgr.GetClient(),
 		Reader: mgr.GetAPIReader(),
 		Scheme: mgr.GetScheme(),
+		Gate:   g,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "changerequest")
 		os.Exit(1)

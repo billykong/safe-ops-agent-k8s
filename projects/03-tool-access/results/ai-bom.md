@@ -1,6 +1,6 @@
 # AI bill of materials
 
-Generated 2026-10-09T11:20:44Z by `scripts/ai-bom.sh` from the code and the running cluster (P3-23).
+Generated 2026-10-10T08:21:06Z by `scripts/ai-bom.sh` from the code and the running cluster (P3-23).
 
 ## Models
 
@@ -14,6 +14,12 @@ Generated 2026-10-09T11:20:44Z by `scripts/ai-bom.sh` from the code and the runn
 | Prompt | Source | SHA-256 |
 | --- | --- | --- |
 | agent system prompt | `projects/02-approval-gate/durable/agent/model.py (SYSTEM)` | `sha256:0aa9802a7efbc6bbc6ec1bafbc8befbcea1911b052e3bf8f47ae9b57f341a739` |
+
+## Policies
+
+| Policy | Source | SHA-256 |
+| --- | --- | --- |
+| semantic action gate | `projects/02-approval-gate/policy/gate.rego` | `sha256:af48c536adddad7280b4b27b9293c2890783a9de0a4d25a6430d2ac2e8431091` |
 
 ## Tools
 
@@ -34,10 +40,10 @@ Generated 2026-10-09T11:20:44Z by `scripts/ai-bom.sh` from the code and the runn
 | Component | Image | Digest running |
 | --- | --- | --- |
 | agent/agent-worker | `docker.io/library/approval-agent:dev` | `sha256:89f5aa94349ea77980ab57e5a13473434c3ce32c44c8c9e772395e3379d5897c` |
-| approval-system/approval-controller | `docker.io/library/approval-controller:dev` | `sha256:54a129f252431c05c64683c0e04567bae5dbf1f4ab32dda6368a838b04df34dc` |
-| gateways/llm-gateway | `docker.io/library/agent-gateway:dev` | `sha256:910881a0123a95483fda32c55617cd3076f1bb1088d56b98567a4ac2ef62ca66` |
-| gateways/mcp-gateway | `docker.io/library/mcp-gateway:dev` | `sha256:58974637bbcae731c4d67d1b20ea2f94354e48465a4a9b3af4e7d2c93bb4cb6f` |
-| gateways/mock-model | `docker.io/library/mock-model:dev` | `sha256:084c4ceac77609511b294ef8c586e89fff9f533a979916f83a1a8037997dc0f9` |
-| mcp-servers/incident-tracker | `docker.io/library/mcp-tools:dev` | `sha256:869ed53fca1bfa88f64ca8c4f138ed6fecee0432920c15ed46e85297cc7a9f56` |
-| mcp-servers/incidents-mcp | `docker.io/library/mcp-tools:dev` | `sha256:869ed53fca1bfa88f64ca8c4f138ed6fecee0432920c15ed46e85297cc7a9f56` |
+| approval-system/approval-controller | `docker.io/library/approval-controller:dev` | `sha256:1cf0bac0b4dd499ef5279209859486ab0655b7acafb7290f3d4433f869497dd0` |
+| gateways/llm-gateway | `docker.io/library/agent-gateway:dev` | `sha256:821f2a1d33d6752953250d7dbd545d1980c3a5e0afae2317acadf02e86b07eec` |
+| gateways/mcp-gateway | `docker.io/library/mcp-gateway:dev` | `sha256:8212afedde5b046e5cf86b00a15a057964151342380be41bb2a51f1a851673d2` |
+| gateways/mock-model | `docker.io/library/mock-model:dev` | `sha256:b5bf2eab16e19a694e91b042d02ef97311fc0d467102cd8680e9ca0f4d26f283` |
+| mcp-servers/incident-tracker | `docker.io/library/mcp-tools:dev` | `sha256:8d576d2af70e29b708a5919e17158500e3042cbc297c554163a51d8fb6c454b5` |
+| mcp-servers/incidents-mcp | `docker.io/library/mcp-tools:dev` | `sha256:8d576d2af70e29b708a5919e17158500e3042cbc297c554163a51d8fb6c454b5` |
 | temporal/temporal | `docker.io/temporalio/temporal:1.9.1` | `sha256:e1534f2d0aa0ce2d79375ce20ac15a3405fc51c3e7bd374f4ac204bc94e1252c` |

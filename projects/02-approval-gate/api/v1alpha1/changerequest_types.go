@@ -210,6 +210,30 @@ type ComputedBlastRadius struct {
 	Summary           string   `json:"summary"`
 }
 
+// PolicyResult of the semantic action gate.
+// +kubebuilder:validation:Enum=Allow;Escalate;Deny
+type PolicyResult string
+
+const (
+	// PolicyAllow: no objection; the change budget may pay for it.
+	PolicyAllow PolicyResult = "Allow"
+	// PolicyEscalate: a human must approve it.
+	PolicyEscalate PolicyResult = "Escalate"
+	// PolicyDeny: rejected; no approval can override it.
+	PolicyDeny PolicyResult = "Deny"
+)
+
+// PolicyDecision is the semantic action gate's verdict on a proposal's
+// computed effect (P3-10), from policy/gate.rego.
+type PolicyDecision struct {
+	Result PolicyResult `json:"result"`
+	// +optional
+	Reasons []string `json:"reasons,omitempty"`
+	// policySHA: the policy text that decided.
+	// +optional
+	PolicySHA string `json:"policySHA,omitempty"`
+}
+
 // Review is the packet the approver reviews, computed by the controller
 // from the cluster, with no model involved (P2-40). It is covered by the
 // review hash, so an approval binds to it.
@@ -226,6 +250,9 @@ type Review struct {
 	// rollbackCheck: whether the rollback plan, applied to the dry run's
 	// result, restores the reviewed pre-state exactly.
 	RollbackCheck string `json:"rollbackCheck"`
+	// policy: the semantic action gate's decision on everything above.
+	// +optional
+	Policy *PolicyDecision `json:"policy,omitempty"`
 }
 
 // ChangeRequestStatus is owned by the controller, except approval.

@@ -24,7 +24,7 @@ flowchart LR
   subgraph ctl["control namespace"]
     cr[("ChangeRequest CRs")]
     controller["Approval controller / executor<br/>no LLM, holds write creds"]
-    policy["Policy engine<br/>Kyverno / OPA, VAP (built)"]
+    policy["Policy engine<br/>OPA (Rego, in the controller), VAP (built)"]
     kill["Kill switch"]
   end
 
@@ -59,7 +59,7 @@ flowchart LR
 | **Agent loop** | P1-P3 | Semi-trusted: its inputs are attacker-influenced | One workload identity per agent (`runner`, `proposer`); no write credentials; no model key | Built as a scripted Job (P1) and a Temporal worker (P2); LLM loop in P3 |
 | **LLM gateway** | P3 | Trusted | Model API key; token budgets and rate limits | Planned |
 | **MCP / tool gateway** | P3 | Trusted | Tool secrets; per-agent authorisation | Planned |
-| **Policy engine** (Kyverno/OPA; ValidatingAdmissionPolicy) | P1-P3 | Trusted | Rules: allow, deny, escalate | VAP for sandbox claims built (P1); rest planned |
+| **Policy engine** (OPA embedded in the approval controller; ValidatingAdmissionPolicy) | P1-P3 | Trusted | Rules: allow, deny, escalate | VAPs for claims, approvals and the agents' writes (P1-P2); the semantic action gate in Rego (P3) |
 | **ChangeRequest CRD + approval controller / executor** | P2 | Trusted, crown jewel | Namespace-scoped write credentials | Built (M1-M4): CRD, controller, agent proposer role, approval policies, write guard, change budget |
 | **Kill switch** | P2 | Trusted | Flag checked by a fail-closed admission policy, plus credential revocation, workflow termination, scale to zero | Built (M4-M5) |
 | **Durable workflow** (Temporal) | P2 | Trusted; no auth of its own, fenced by network policy (GAP-03) | Agent state across long approvals | Built (M5): Temporal dev server with SQLite on a volume; the agent is a worker |

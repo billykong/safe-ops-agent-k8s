@@ -86,12 +86,12 @@ YAML
 )
 check "budget schema: minReplicas above maxReplicas rejected" 'minReplicas must not exceed maxReplicas' "$out"
 propose big-$T ScaleDeployment 9
-wait_phase big-$T Pending && check "scale to 9 (outside 1-3): waits for a human" 'not covered by the change budget: scaling to 9' "$(st big-$T '{.status.message}')" \
+wait_phase big-$T Pending && check "scale to 9: waits for a human (policy escalates before the budget's range applies)" 'not covered by the change budget: policy says Escalate: .*LargeScaleUp' "$(st big-$T '{.status.message}')" \
   || fail "scale to 9: $(phase big-$T)"
 propose zero-$T ScaleDeployment 0
-wait_phase zero-$T Pending && check "scale to 0: waits for a human" 'not covered.*scaling to 0' "$(st zero-$T '{.status.message}')" || fail "scale to 0: $(phase zero-$T)"
+wait_phase zero-$T Pending && check "scale to 0: waits for a human" 'not covered by the change budget: policy says Escalate: .*ScaleToZero' "$(st zero-$T '{.status.message}')" || fail "scale to 0: $(phase zero-$T)"
 propose flag-$T ScaleDeployment 3
-wait_phase flag-$T Pending && check "1 -> 3 (in range, but more than doubles): flagged, so waits for a human" 'review findings \[LargeScaleUp\]' "$(st flag-$T '{.status.message}')" \
+wait_phase flag-$T Pending && check "1 -> 3 (in range, but more than doubles): flagged, so waits for a human" 'policy says Escalate: Warning finding LargeScaleUp' "$(st flag-$T '{.status.message}')" \
   || fail "flagged change: $(phase flag-$T)"
 settle
 propose auto1-$T ScaleDeployment 2

@@ -151,14 +151,17 @@ settle
 actl reject up-$T --yes --wait 0s >/dev/null
 actl reject up2-$T --yes --wait 0s >/dev/null
 actl reject restart-$T --yes --wait 0s >/dev/null
-for n in down big; do actl reject $n-$T --yes --wait 0s >/dev/null; done
+actl reject down-$T --yes --wait 0s >/dev/null
+# big-$T was refused by the server's dry run, which the policy denies
+# (P3 milestone 4): rejected by the controller, nothing for a human to decide.
+check "a refused dry run is denied by policy and rejected outright" '^Rejected Deny$' "$(phase big-$T) $(kubectl get changerequest -n $NS big-$T -o jsonpath='{.status.review.policy.result}')"
 sleep 3
 [ "$(phase good-$T)" = Applied ] && [ -n "$(st good-$T '{.status.decidedAt}')" ] && pass "decidedAt recorded" || fail "good-$T: $(phase good-$T), no decidedAt"
 out=$(actl stats)
 row=$(grep "^$APPROVER " <<<"$out" || true)
 # APPROVER APPROVED REJECTED RATE MEDIAN P90 FLAGGED CRITICAL
 read -r _ ap rj rate _ _ fl cr <<<"$row"
-[ "$ap" = 2 ] && [ "$rj" = 5 ] && [ "$rate" = "29%" ] && pass "stats: $APPROVER approved 2, rejected 5 (29%)" || fail "stats row: $row"
+[ "$ap" = 2 ] && [ "$rj" = 4 ] && [ "$rate" = "33%" ] && pass "stats: $APPROVER approved 2, rejected 4 (33%)" || fail "stats row: $row"
 [ "$fl" = 1 ] && [ "$cr" = 1 ] && pass "stats: 1 approval of a Critical-flagged request (the scale to zero)" || fail "flagged: $row"
 check "stats: outcomes and time to decision summarised" 'settled by: humans [0-9]+.*time to decision: humans median [0-9]' "$(tr '\n' ' ' <<<"$out")"
 # The port-forward starts in this shell, not inside $( ), and runs the

@@ -2,7 +2,7 @@
 
 **Goal:** the agent reaches models and tools only through gateways, under its own identity, holding no secrets. A policy engine outside the model decides each action. Prompt-injection attacks are shown to fail at a named layer even when the model complies. Covers goal G3.
 
-Status: **milestones 1-3 done** (per-agent workload identity; LLM gateway with per-identity budgets, model-driven agent; MCP tools behind a gateway with pinned descriptors). Implementation: [projects/03-tool-access/](../../../projects/03-tool-access/README.md). Depends on P1; benefits from P5 (a weak local model as a red-team target).
+Status: **milestones 1-4 done** (per-agent workload identity; LLM gateway with per-identity budgets, model-driven agent; MCP tools behind a gateway with pinned descriptors; semantic action gate in embedded OPA). Implementation: [projects/03-tool-access/](../../../projects/03-tool-access/README.md). Depends on P1; benefits from P5 (a weak local model as a red-team target).
 
 ## User stories
 
@@ -27,8 +27,8 @@ Status: **milestones 1-3 done** (per-agent workload identity; LLM gateway with p
 
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
-| P3-10 | A policy engine (Kyverno, OPA Gatekeeper or ValidatingAdmissionPolicy) acts as the semantic action gate: allow, deny or escalate per rule, evaluating the action's effect rather than its text. | Must | Planned; engine is an open question |
-| P3-11 | The gate holds independently of the model: a model that fully complies with an injection still can't get a disallowed action through. | Must | Planned |
+| P3-10 | A policy engine (Kyverno, OPA Gatekeeper or ValidatingAdmissionPolicy) acts as the semantic action gate: allow, deny or escalate per rule, evaluating the action's effect rather than its text. | Must | **Done** with OPA (Rego) embedded in the approval controller: `make test-policy` (allow, escalate or deny per rule on the computed effect: dry run, blast radius, findings, rollback check, target and namespace labels; deny can't be overridden by approval; escalate needs a human; only allow lets the budget pay; missing or broken policy denies) |
+| P3-11 | The gate holds independently of the model: a model that fully complies with an injection still can't get a disallowed action through. | Must | **Done**: `make test-policy` (a model that obeys an injected instruction, directly or through a poisoned MCP tool result, proposes scaling a critical service to zero; the gate denies it both times and the service is untouched) |
 
 ### Supply chain
 

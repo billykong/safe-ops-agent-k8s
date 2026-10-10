@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -25,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	approvalv1alpha1 "github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/api/v1alpha1"
+	"github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/internal/gate"
 )
 
 // RestartAnnotation is what `kubectl rollout restart` sets on the pod template.
@@ -42,6 +44,8 @@ type ChangeRequestReconciler struct {
 	Scheme *runtime.Scheme
 	// Now is the clock, replaceable in tests.
 	Now func() time.Time
+	// Gate is the semantic action gate's policy; nil denies everything.
+	Gate *gate.Gate
 }
 
 // The controller reads ChangeRequests everywhere and writes only their
@@ -50,6 +54,8 @@ type ChangeRequestReconciler struct {
 // +kubebuilder:rbac:groups=approval.safe-ops.io,resources=changerequests/status,verbs=get;update;patch
 // Write access to targets is namespace-scoped, never cluster-wide (P2-03).
 // +kubebuilder:rbac:groups=apps,namespace=workloads,resources=deployments,verbs=get;patch
+// Read namespace labels (agent-managed, replica ceiling) for the policy.
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get
 // Read the disruption budgets that cover a target, for the review packet.
 // +kubebuilder:rbac:groups=policy,namespace=workloads,resources=poddisruptionbudgets,verbs=list
 // The change budget: read it, and record grants in its status (P2-20).
@@ -101,6 +107,10 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		if err := r.propose(ctx, &cr, dep); err != nil {
 			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, err.Error())
 		}
+		if why := denied(&cr); why != "" {
+			st.Approval, st.BudgetGrant = nil, nil
+			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseRejected, why)
+		}
 		st.Phase = approvalv1alpha1.PhasePending
 		// The budget is consulted once, here. A request it doesn't pay
 		// for waits for a human, even if budget frees up later.
@@ -123,6 +133,9 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			st.Approval, st.BudgetGrant = nil, nil
 			if err := r.propose(ctx, &cr, dep); err != nil {
 				return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, err.Error())
+			}
+			if why := denied(&cr); why != "" {
+				return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseRejected, why)
 			}
 			st.Phase, st.Message = approvalv1alpha1.PhaseNeedsReapproval, "re-proposed with a review hash and expiry: approve again"
 			return ctrl.Result{}, r.save(ctx, &cr, base)
@@ -170,6 +183,9 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			st.Approval, st.BudgetGrant = nil, nil
 			if err := r.propose(ctx, &cr, dep); err != nil {
 				return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseFailed, err.Error())
+			}
+			if why := denied(&cr); why != "" {
+				return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseRejected, why)
 			}
 			st.Phase = approvalv1alpha1.PhaseNeedsReapproval
 			st.Message = fmt.Sprintf("target changed since it was reviewed (generation %d -> %d, replicas %d -> %d): re-approve the new plan",
@@ -245,7 +261,25 @@ func (r *ChangeRequestReconciler) review(ctx context.Context, cr *approvalv1alph
 	}
 	rv.BlastRadius = BlastRadius(dep, cr.Spec.Action, pdbs.Items)
 	rv.Findings = Findings(dep, cr.Spec.Action, rv.BlastRadius, pdbs.Items, rv.Diff, refusal)
+	// The semantic action gate (P3-10): the policy judges this effect.
+	var ns corev1.Namespace
+	if err := r.Reader.Get(ctx, types.NamespacedName{Name: dep.Namespace}, &ns); err != nil {
+		return nil, fmt.Errorf("reading namespace %s: %w", dep.Namespace, err)
+	}
+	in, err := PolicyInput(cr, dep, &ns, rv)
+	if err != nil {
+		return nil, err
+	}
+	rv.Policy = r.Gate.Decide(ctx, in)
 	return rv, nil
+}
+
+// denied explains a Deny from the semantic action gate, or returns "".
+func denied(cr *approvalv1alpha1.ChangeRequest) string {
+	if rv := cr.Status.Review; rv != nil && rv.Policy != nil && rv.Policy.Result == approvalv1alpha1.PolicyDeny {
+		return "denied by policy, whoever approves: " + strings.Join(rv.Policy.Reasons, "; ")
+	}
+	return ""
 }
 
 func approverOf(cr *approvalv1alpha1.ChangeRequest) string {
@@ -290,21 +324,17 @@ func (r *ChangeRequestReconciler) spendBudget(ctx context.Context, cr *approvalv
 	if err != nil {
 		return nil, "", err
 	}
+	// The budget pays only for changes the semantic action gate allows
+	// (P2-44, P3-10: risk tiers decided by deterministic policy).
+	if rv := cr.Status.Review; rv == nil || rv.Policy == nil || rv.Policy.Result != approvalv1alpha1.PolicyAllow {
+		why := "no policy decision"
+		if rv != nil && rv.Policy != nil {
+			why = fmt.Sprintf("policy says %s: %s", rv.Policy.Result, strings.Join(rv.Policy.Reasons, "; "))
+		}
+		return nil, "waiting for approval: not covered by the change budget: " + why, nil
+	}
 	if err := Eligible(b.Spec, cr.Spec.Action); err != nil {
 		return nil, "waiting for approval: not covered by the change budget: " + err.Error(), nil
-	}
-	// The budget pays only for changes the review rules find nothing to
-	// warn about (P2-44: risk tiers decided by deterministic policy).
-	if rv := cr.Status.Review; rv != nil {
-		if w := Worst(rv.Findings); w == approvalv1alpha1.SeverityWarning || w == approvalv1alpha1.SeverityCritical {
-			codes := []string{}
-			for _, f := range rv.Findings {
-				if f.Severity != approvalv1alpha1.SeverityInfo {
-					codes = append(codes, f.Code)
-				}
-			}
-			return nil, fmt.Sprintf("waiting for approval: not covered by the change budget: review findings %v", codes), nil
-		}
 	}
 	now, window := r.now(), BudgetWindow(b.Spec)
 	live := InWindow(b.Status.Grants, window, now)

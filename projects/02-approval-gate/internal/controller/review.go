@@ -10,6 +10,7 @@ import (
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -247,4 +248,28 @@ func RollbackCheck(live, after map[string]any, rollback string) string {
 		return "FAILED: the rollback leaves these fields changed: " + strings.Join(paths, ", ")
 	}
 	return "passed: the rollback patch, applied to the dry run's result, restores the pre-state exactly"
+}
+
+// PolicyInput is what the semantic action gate sees: the typed action, the
+// live target's labels and pods, the namespace's labels, and the computed
+// review (not the proposer's text).
+func PolicyInput(cr *approvalv1alpha1.ChangeRequest, dep *appsv1.Deployment, ns *corev1.Namespace, rv *approvalv1alpha1.Review) (map[string]any, error) {
+	b, err := json.Marshal(map[string]any{
+		"action":    cr.Spec.Action,
+		"target":    map[string]any{"labels": nonNilMap(dep.Labels), "replicasBefore": Observe(dep).Replicas, "readyBefore": dep.Status.ReadyReplicas},
+		"namespace": map[string]any{"name": ns.Name, "labels": nonNilMap(ns.Labels)},
+		"review":    rv,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var in map[string]any
+	return in, json.Unmarshal(b, &in)
+}
+
+func nonNilMap(m map[string]string) map[string]string {
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
 }

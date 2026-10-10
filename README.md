@@ -38,6 +38,7 @@ make test-review               # computed review packet, Critical-finding overri
 make p3 test-identity          # per-agent identities; gateway tokens: audience, pod binding, revocation
 make test-llm-gateway          # LLM gateway (mock provider): no key in the agent, policy, budgets, degrade
 make test-mcp                  # MCP gateway: brokered secrets, pinned descriptors, rug pull, agent reads MCP
+make test-policy               # semantic action gate (embedded OPA): allow/escalate/deny on effect
 ./scripts/kill-switch.sh stop --reason TEXT   # runbook: docs/runbooks/kill-switch.md
 ./scripts/new-approver.sh NAME # issue an approver certificate; then approvalctl with that kubeconfig
 ```
