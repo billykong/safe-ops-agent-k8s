@@ -37,6 +37,8 @@ spec:
         # MCP tools, only through the MCP gateway (P3-04): server=url pairs.
         - {name: MCP_SERVERS, value: "incidents=http://mcp-gateway.gateways.svc.cluster.local:8080/mcp/incidents,netdiag=http://mcp-gateway.gateways.svc.cluster.local:8080/mcp/netdiag"}
         - {name: MCP_GATEWAY_TOKEN_FILE, value: /var/run/secrets/safe-ops.io/mcp-gateway/token}
+        # Traces and the agent's own metrics, to the collector (P4).
+        - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://otel-collector.observability.svc.cluster.local:4318"}
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true

@@ -50,8 +50,16 @@ spec:
         - {name: UPSTREAM_URL, value: "http://mock-model.gateways.svc.cluster.local:8080"}
         - {name: UPSTREAM_TIMEOUT, value: 60s}
         - {name: API_KEY_FILE, value: /var/run/secrets/safe-ops.io/upstream/api-key}
+        # Cost estimate (P4-02): USD per million input:output tokens, cache
+        # writes and reads at the provider's usual 1.25x and 0.1x of input.
+        # List prices: keep them current, or the dashboards' costs drift.
+        - {name: PRICES, value: "claude-opus-5-5=5:25"}
+        # Traces to the collector; metrics on :9090 for Prometheus (P4).
+        - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://otel-collector.observability.svc.cluster.local:4318"}
+        - {name: METRICS_LISTEN, value: ":9090"}
         ports:
         - {name: http, containerPort: 8080}
+        - {name: metrics, containerPort: 9090}
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
@@ -88,3 +96,4 @@ spec:
   selector: {app: llm-gateway}
   ports:
   - {name: http, port: 8080, targetPort: http}
+  - {name: metrics, port: 9090, targetPort: metrics}

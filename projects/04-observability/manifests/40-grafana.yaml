@@ -1,0 +1,107 @@
+# Grafana (P4-02): dashboards over Prometheus and Jaeger, provisioned from
+# git (dashboards/, published as ConfigMap grafana-dashboards by `make
+# p4`). Reached by port-forward only (scripts/observability.sh). Anonymous
+# users may view; the admin password is random, in Secret grafana-admin.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-provisioning
+  namespace: observability
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+    - name: Prometheus
+      uid: prometheus
+      type: prometheus
+      access: proxy
+      url: http://prometheus.observability.svc.cluster.local:9090
+      isDefault: true
+      jsonData: {timeInterval: 15s}
+    - name: Jaeger
+      uid: jaeger
+      type: jaeger
+      access: proxy
+      url: http://jaeger.observability.svc.cluster.local:16686
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+    - name: safe-ops
+      folder: Safe-ops
+      type: file
+      disableDeletion: true
+      allowUiUpdates: false
+      options: {path: /etc/grafana/dashboards}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: grafana}
+  template:
+    metadata:
+      labels: {app: grafana}
+    spec:
+      automountServiceAccountToken: false
+      dnsConfig:
+        options: [{name: ndots, value: "1"}]
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: grafana
+        image: grafana/grafana:13.2.2
+        imagePullPolicy: IfNotPresent
+        env:
+        - {name: GF_AUTH_ANONYMOUS_ENABLED, value: "true"}
+        - {name: GF_AUTH_ANONYMOUS_ORG_ROLE, value: Viewer}
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          valueFrom: {secretKeyRef: {name: grafana-admin, key: password}}
+        - {name: GF_ANALYTICS_REPORTING_ENABLED, value: "false"}
+        - {name: GF_ANALYTICS_CHECK_FOR_UPDATES, value: "false"}
+        - {name: GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES, value: "false"}
+        - {name: GF_NEWS_NEWS_FEED_ENABLED, value: "false"}
+        # No egress beyond the datasources: nothing to fetch plugins from.
+        - {name: GF_PLUGINS_PREINSTALL_DISABLED, value: "true"}
+        - {name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH, value: /etc/grafana/dashboards/safe-ops-agent.json}
+        ports:
+        - {name: http, containerPort: 3000}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        resources:
+          requests: {cpu: 50m, memory: 128Mi}
+          limits: {cpu: "1", memory: 384Mi}
+        volumeMounts:
+        - {name: provisioning, mountPath: /etc/grafana/provisioning/datasources/datasources.yaml, subPath: datasources.yaml, readOnly: true}
+        - {name: provisioning, mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml, subPath: dashboards.yaml, readOnly: true}
+        - {name: dashboards, mountPath: /etc/grafana/dashboards, readOnly: true}
+        - {name: data, mountPath: /var/lib/grafana}
+        - {name: tmp, mountPath: /tmp}
+      volumes:
+      - name: provisioning
+        configMap: {name: grafana-provisioning}
+      - name: dashboards
+        configMap: {name: grafana-dashboards}
+      - name: data
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  selector: {app: grafana}
+  ports:
+  - {name: http, port: 3000, targetPort: http}

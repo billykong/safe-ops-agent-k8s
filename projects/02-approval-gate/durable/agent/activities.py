@@ -11,12 +11,15 @@ import urllib.request
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+import telemetry
 from shared import FINAL_PHASES, ChangeTask, Decision, PollRequest
 
 SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
 API = f"https://{os.environ.get('KUBERNETES_SERVICE_HOST', 'localhost')}:{os.environ.get('KUBERNETES_SERVICE_PORT', '443')}"
 CRS = f"{API}/apis/approval.safe-ops.io/v1alpha1/namespaces/approvals/changerequests"
 WORKFLOW_ANNOTATION = "approval.safe-ops.io/workflow-id"
+# The task's trace (P4-01): the controller's spans for this request join it.
+TRACE_ANNOTATION = "approval.safe-ops.io/traceparent"
 POLL_SECONDS = float(os.environ.get("POLL_SECONDS", "2"))
 _ssl = ssl.create_default_context(cafile=f"{SA_DIR}/ca.crt") if os.path.exists(f"{SA_DIR}/ca.crt") else None
 
@@ -49,9 +52,12 @@ def refused(e: urllib.error.HTTPError) -> ApplicationError:
 @activity.defn
 def propose(task: ChangeTask) -> str:
     wf = activity.info().workflow_id
+    annotations = {WORKFLOW_ANNOTATION: wf}
+    if tp := telemetry.trace_headers().get("traceparent"):
+        annotations[TRACE_ANNOTATION] = tp
     body = {
         "apiVersion": "approval.safe-ops.io/v1alpha1", "kind": "ChangeRequest",
-        "metadata": {"name": task.name, "annotations": {WORKFLOW_ANNOTATION: wf}},
+        "metadata": {"name": task.name, "annotations": annotations},
         "spec": {"intent": task.intent, "action": task.action, "blastRadius": task.blast_radius,
                  "scope": {"namespaces": task.scope_namespaces, "kinds": [task.action["target"]["kind"]]},
                  "rollback": task.rollback, "approvalWindowSeconds": task.approval_window_seconds},

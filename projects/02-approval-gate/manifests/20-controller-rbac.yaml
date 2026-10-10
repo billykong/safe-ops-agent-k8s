@@ -50,3 +50,31 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: approval-controller
+---
+# For the metrics endpoint's authentication and authorization (P4-02):
+# controller-runtime asks the API server who a scraper is and whether it
+# may GET /metrics.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: approval-controller-metrics-auth
+rules:
+- apiGroups: [authentication.k8s.io]
+  resources: [tokenreviews]
+  verbs: [create]
+- apiGroups: [authorization.k8s.io]
+  resources: [subjectaccessreviews]
+  verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: approval-controller-metrics-auth
+subjects:
+- kind: ServiceAccount
+  name: approval-controller
+  namespace: approval-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: approval-controller-metrics-auth

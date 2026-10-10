@@ -271,6 +271,7 @@ func (r *ChangeRequestReconciler) review(ctx context.Context, cr *approvalv1alph
 		return nil, err
 	}
 	rv.Policy = r.Gate.Decide(ctx, in)
+	traceDecision(ctx, cr, rv)
 	return rv, nil
 }
 
@@ -416,7 +417,11 @@ func (r *ChangeRequestReconciler) finish(ctx context.Context, cr, base *approval
 		cr.Status.DecidedAt = &t
 	}
 	logf.FromContext(ctx).Info("finished", "phase", phase, "message", msg)
-	return ctrl.Result{}, r.save(ctx, cr, base)
+	if err := r.save(ctx, cr, base); err != nil {
+		return ctrl.Result{}, err
+	}
+	traceFinish(ctx, cr)
+	return ctrl.Result{}, nil
 }
 
 // save writes the controller's status changes as a merge patch against

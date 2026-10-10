@@ -14,14 +14,17 @@ import contextlib
 import hashlib
 import json
 import os
+import time
 import urllib.error
 
 import anthropic
 import httpx2
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
+from opentelemetry.trace import SpanKind, Status, StatusCode
 from temporalio import activity
 
+import telemetry
 from activities import API, k8s, log
 from shared import DecideRequest, Goal, ModelDecision, Observation
 
@@ -61,9 +64,12 @@ TOOLS = [
 ]
 
 
-def escalate(detail, reason="the agent could not decide safely; a human must", **kw):
-    log("escalated", detail=detail, **kw)
-    return ModelDecision(action="Escalate", reason=reason, detail=detail, model=MODEL, **kw)
+def escalate(detail, kind, reason="the agent could not decide safely; a human must", **kw):
+    """`kind` says why in one word, for metrics and traces; `detail` may
+    quote model output or tool errors, so it stays in the log and the
+    workflow result, out of telemetry."""
+    log("escalated", detail=detail, kind=kind, **kw)
+    return ModelDecision(action="Escalate", reason=reason, detail=detail, model=MODEL, escalation=kind, **kw)
 
 
 @activity.defn
@@ -106,6 +112,46 @@ def tool_text(result) -> str:
     return "\n".join(parts)
 
 
+async def add_trace_headers(request):
+    """Carry the current span (the tool call's) to the MCP gateway."""
+    request.headers.update(telemetry.trace_headers())
+
+
+def chat(model, mcp_tools, messages):
+    """One model call through the gateway, as a GenAI `chat` span carrying
+    the trace to the gateway. Attributes: model, ids, finish reason and
+    token counts, never the messages."""
+    attrs = {"gen_ai.operation.name": "chat", "gen_ai.provider.name": "anthropic", "gen_ai.request.model": MODEL,
+             "gen_ai.request.max_tokens": MAX_TOKENS, "server.address": GATEWAY.split("://", 1)[-1].split(":")[0]}
+    metric_attrs = {k: attrs[k] for k in ("gen_ai.operation.name", "gen_ai.provider.name", "gen_ai.request.model")}
+    start = time.monotonic()
+    with telemetry.tracer.start_as_current_span(f"chat {MODEL}", kind=SpanKind.CLIENT, attributes=attrs,
+                                                record_exception=False, set_status_on_exception=False) as span:
+        try:
+            resp = model.beta.messages.create(
+                model=MODEL, max_tokens=MAX_TOKENS, system=SYSTEM, tools=TOOLS + mcp_tools,
+                output_config={"effort": "medium"},
+                betas=["server-side-fallback-2026-07-01"], fallbacks="default",
+                messages=messages, extra_headers=telemetry.trace_headers(),
+            )
+        except Exception as e:
+            span.set_attribute("error.type", type(e).__name__)
+            span.set_status(Status(StatusCode.ERROR))
+            telemetry.model_calls.add(1, {"outcome": type(e).__name__})
+            telemetry.duration.record(time.monotonic() - start, {**metric_attrs, "error.type": type(e).__name__})
+            raise
+        u = resp.usage
+        tokens_in = u.input_tokens + (u.cache_read_input_tokens or 0) + (u.cache_creation_input_tokens or 0)
+        span.set_attributes({"gen_ai.response.id": resp.id, "gen_ai.response.model": resp.model,
+                             "gen_ai.response.finish_reasons": [resp.stop_reason or ""],
+                             "gen_ai.usage.input_tokens": tokens_in, "gen_ai.usage.output_tokens": u.output_tokens})
+        telemetry.model_calls.add(1, {"outcome": "ok"})
+        telemetry.duration.record(time.monotonic() - start, metric_attrs)
+        telemetry.token_usage.record(tokens_in, {**metric_attrs, "gen_ai.token.type": "input"})
+        telemetry.token_usage.record(u.output_tokens, {**metric_attrs, "gen_ai.token.type": "output"})
+        return resp
+
+
 async def _decide(goal: Goal, obs: Observation) -> ModelDecision:
     state = (f"replicas {obs.replicas}, ready {obs.ready_replicas}, generation {obs.generation}, "
              f"last restart {obs.restarted_at or 'never'}")
@@ -120,7 +166,8 @@ async def _decide(goal: Goal, obs: Observation) -> ModelDecision:
             with open(MCP_TOKEN_FILE) as f:
                 mcp_token = f.read().strip()
             http = await stack.enter_async_context(httpx2.AsyncClient(
-                headers={"Authorization": f"Bearer {mcp_token}"}, timeout=httpx2.Timeout(30.0, read=60.0)))
+                headers={"Authorization": f"Bearer {mcp_token}"}, timeout=httpx2.Timeout(30.0, read=60.0),
+                event_hooks={"request": [add_trace_headers]}))
             for server, url in MCP_SERVERS.items():
                 try:
                     c = await stack.enter_async_context(Client(streamable_http_client(url, http_client=http)))
@@ -140,69 +187,85 @@ async def _decide(goal: Goal, obs: Observation) -> ModelDecision:
         messages = [{"role": "user", "content": user}]
         for step in range(MAX_STEPS):
             try:
-                resp = model.beta.messages.create(
-                    model=MODEL, max_tokens=MAX_TOKENS, system=SYSTEM, tools=TOOLS + mcp_tools,
-                    output_config={"effort": "medium"},
-                    betas=["server-side-fallback-2026-07-01"], fallbacks="default",
-                    messages=messages,
-                )
+                resp = chat(model, mcp_tools, messages)
             except anthropic.RateLimitError as e:
-                return escalate(f"model budget or rate limit reached at the gateway: {e.message}", tools_used=used)
+                return escalate(f"model budget or rate limit reached at the gateway: {e.message}", "gateway_budget", tools_used=used)
             except (anthropic.APIConnectionError, anthropic.InternalServerError) as e:
-                return escalate(f"model unavailable: {e}", tools_used=used)
+                return escalate(f"model unavailable: {e}", "model_unavailable", tools_used=used)
             except anthropic.APIStatusError as e:
-                return escalate(f"model request failed (HTTP {e.status_code}): {e.message}", tools_used=used)
+                return escalate(f"model request failed (HTTP {e.status_code}): {e.message}", "model_request_failed", tools_used=used)
             rid = getattr(resp, "_request_id", "") or ""
             if resp.stop_reason == "refusal":
                 cat = getattr(resp.stop_details, "category", None) if resp.stop_details else None
-                return escalate(f"the model declined (category {cat})", request_id=rid, tools_used=used)
+                return escalate(f"the model declined (category {cat})", "model_refused", request_id=rid, tools_used=used)
             calls = [b for b in resp.content if b.type == "tool_use"]
             actions = [c for c in calls if "__" not in c.name]
             lookups = [c for c in calls if "__" in c.name]
             if actions:
                 if len(calls) != 1:
                     return escalate(f"the model mixed {len(actions)} action(s) with {len(lookups)} lookup(s) in one turn",
-                                    request_id=rid, tools_used=used)
+                                    "invalid_output", request_id=rid, tools_used=used)
                 call = actions[0]
                 try:
                     reason = validate(call.name, call.input)
                 except ValueError as e:
-                    return escalate(f"invalid model output: {e}", request_id=rid, tools_used=used)
+                    return escalate(f"invalid model output: {e}", "invalid_output", request_id=rid, tools_used=used)
                 log("decided", tool=call.name, input=json.dumps(call.input), model=resp.model, request_id=rid, prompt_sha=PROMPT_SHA,
                     step=step, tools_used=used, input_tokens=resp.usage.input_tokens, output_tokens=resp.usage.output_tokens)
                 kw = dict(model=resp.model, request_id=rid, tools_used=used)
                 if call.name == "escalate_to_human":
-                    return ModelDecision(action="Escalate", reason=reason, detail="the model chose to escalate", **kw)
+                    return ModelDecision(action="Escalate", reason=reason, detail="the model chose to escalate", escalation="model_chose", **kw)
                 if call.name == "propose_restart_deployment":
                     return ModelDecision(action="RestartDeployment", reason=reason, **kw)
                 return ModelDecision(action="ScaleDeployment", reason=reason, replicas=call.input["replicas"], **kw)
             if not lookups:
-                return escalate(f"the model gave no action (stop_reason {resp.stop_reason})", request_id=rid, tools_used=used)
+                return escalate(f"the model gave no action (stop_reason {resp.stop_reason})", "no_action", request_id=rid, tools_used=used)
             if len(lookups) > MAX_TOOL_CALLS_PER_STEP:
-                return escalate(f"the model asked for {len(lookups)} lookups in one turn", request_id=rid, tools_used=used)
+                return escalate(f"the model asked for {len(lookups)} lookups in one turn", "too_many_lookups", request_id=rid, tools_used=used)
             results = []
             for call in lookups:
                 server, tool = call.name.split("__", 1)
+                # The name is model output: a label only if it's a listed tool.
+                known_tool = call.name if any(t["name"] == call.name for t in mcp_tools) else "other"
                 c = clients.get(server)
                 if c is None:
                     text, err = f"no MCP server {server!r} is available", True
                 else:
-                    try:
-                        r = await c.call_tool(tool, call.input if isinstance(call.input, dict) else {})
-                        text, err = tool_text(r), bool(r.is_error)
-                    except Exception as e:  # refused by the gateway, or the server failed
-                        text, err = f"tool call failed: {e}", True
+                    with telemetry.tracer.start_as_current_span(f"execute_tool {known_tool}", attributes={
+                            "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": known_tool,
+                            "gen_ai.tool.type": "extension", "gen_ai.tool.call.id": call.id}) as span:
+                        try:
+                            r = await c.call_tool(tool, call.input if isinstance(call.input, dict) else {})
+                            text, err = tool_text(r), bool(r.is_error)
+                        except Exception as e:  # refused by the gateway, or the server failed
+                            text, err = f"tool call failed: {e}", True
+                        span.set_attribute("safeops.tool.result_bytes", len(text))
+                        if err:
+                            span.set_attribute("error.type", "tool_error")
+                            span.set_status(Status(StatusCode.ERROR))
+                telemetry.tool_calls.add(1, {"tool": known_tool, "outcome": "error" if err else "ok"})
                 used.append(call.name)
                 log("tool_called", tool=call.name, error=err, bytes=len(text))
                 results.append({"type": "tool_result", "tool_use_id": call.id, "is_error": err,
                                 "content": f'<tool_output source="{server}/{tool}" trust="untrusted">\n{text}\n</tool_output>'})
             messages.append({"role": "assistant", "content": resp.content})
             messages.append({"role": "user", "content": results})
-        return escalate(f"no decision after {MAX_STEPS} model calls", tools_used=used)
+        return escalate(f"no decision after {MAX_STEPS} model calls", "step_limit", tools_used=used)
 
 
 @activity.defn
 def decide(req: DecideRequest) -> ModelDecision:
-    if not req.observation.exists:
-        return escalate(f"Deployment {req.goal.target_namespace}/{req.goal.target_name} doesn't exist")
-    return asyncio.run(_decide(req.goal, req.observation))
+    goal = req.goal
+    with telemetry.tracer.start_as_current_span("invoke_agent safe-ops-agent", attributes={
+            "gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "safe-ops-agent",
+            "gen_ai.request.model": MODEL, "safeops.task": goal.name,
+            "safeops.target": f"{goal.target_namespace}/{goal.target_name}", "safeops.prompt_sha": PROMPT_SHA}) as span:
+        if not req.observation.exists:
+            d = escalate(f"Deployment {goal.target_namespace}/{goal.target_name} doesn't exist", "no_target")
+        else:
+            d = asyncio.run(_decide(goal, req.observation))
+        span.set_attributes({"safeops.decision": d.action, "safeops.tools_used": len(d.tools_used)})
+        if d.escalation:
+            span.set_attribute("safeops.escalation", d.escalation)
+        telemetry.tasks.add(1, {"decision": d.action, "escalation": d.escalation or "none"})
+        return d

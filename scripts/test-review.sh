@@ -168,12 +168,16 @@ check "stats: outcomes and time to decision summarised" 'settled by: humans [0-9
 # kubectl binary rather than lib.sh's kubectl function: backgrounding a
 # function backgrounds a subshell, $! is the subshell, and killing it
 # leaves the real port-forward running after the test.
+# The endpoint is HTTPS and authorizes each scrape (P4-02): read it as
+# Prometheus does, with Prometheus's identity (make p4).
+METRICS_TOKEN=$(kubectl create token prometheus -n observability --duration=10m 2>/dev/null || true)
+[ -n "$METRICS_TOKEN" ] || fail "no token for observability/prometheus (make p4): the metrics checks below can't read the endpoint"
 forward() {
   kill "${PF:-}" 2>/dev/null || true
-  command kubectl --context "$KUBE_CONTEXT" port-forward -n approval-system deploy/approval-controller 18080:8080 >/dev/null 2>&1 & PF=$!
-  for _ in $(seq 1 20); do curl -sf -o /dev/null localhost:18080/metrics 2>/dev/null && return 0; sleep 0.5; done
+  command kubectl --context "$KUBE_CONTEXT" port-forward -n approval-system deploy/approval-controller 18443:8443 >/dev/null 2>&1 & PF=$!
+  for _ in $(seq 1 20); do metrics | grep -q . && return 0; sleep 0.5; done
 }
-metrics() { curl -sf localhost:18080/metrics 2>/dev/null || true; }
+metrics() { curl -skf -H "Authorization: Bearer $METRICS_TOKEN" https://localhost:18443/metrics 2>/dev/null || true; }
 forward
 m=$(metrics)
 check "metrics: approver decisions" "safeops_approver_decisions\{approver=\"$APPROVER\",decision=\"approved\"\} 2" "$m"
@@ -196,6 +200,8 @@ check "rollback proposal's diff is the exact inverse" '^spec.replicas 2 1 $' "$(
 actl approve undo-$T --yes --wait 30s >/dev/null
 [ "$(phase undo-$T)" = Applied ] && [ "$(replicas)" = 1 ] && pass "rolled back: approved and applied, web at 1 again" || fail "undo-$T: $(phase undo-$T)"
 np=$(kubectl get networkpolicy -n approval-system default-deny-all -o jsonpath='{.spec.policyTypes}')
-check "metrics port not exposed: the namespace still denies all ingress" 'Ingress' "$np"
+check "the namespace still denies all ingress by default" 'Ingress' "$np"
+np=$(kubectl get networkpolicy -n approval-system -o jsonpath='{range .items[*]}{.metadata.name}:{.spec.ingress[*].from[*].podSelector.matchLabels.app}:{.spec.ingress[*].ports[*].port} {end}')
+check "the metrics port admits Prometheus only (P4)" '^controller-metrics-from-prometheus:prometheus:8443 default-deny-all:: $' "$np"
 
 exit $FAILED
