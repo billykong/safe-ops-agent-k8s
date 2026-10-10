@@ -142,3 +142,83 @@ spec:
     - matchLabels: {app: incident-tracker}
     toPorts:
     - ports: [{port: "8080", protocol: TCP}]
+---
+# The netdiag MCP server (P3 milestone 5): a DNS lookup tool, the
+# red-team's "approved tool" for exfiltration (P3-31). Reachable only from
+# the MCP gateway; its own DNS answers cluster service names only.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: netdiag-mcp
+  namespace: mcp-servers
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: netdiag-mcp}
+  template:
+    metadata:
+      labels: {app: netdiag-mcp}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 65534, runAsGroup: 65534, seccompProfile: {type: RuntimeDefault}}
+      # No search domains: a name is looked up exactly as given, so what the
+      # tool asks for is what DNS (and Cilium's DNS proxy) sees.
+      dnsConfig:
+        options: [{name: ndots, value: "1"}]
+      containers:
+      - name: mcp
+        image: mcp-tools:dev
+        imagePullPolicy: Never
+        args: ["-m", "uvicorn", "netdiag_mcp:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "warning"]
+        env:
+        - {name: ALLOWED_HOSTS, value: "netdiag-mcp.mcp-servers.svc.cluster.local:8080"}
+        ports: [{name: http, containerPort: 8080}]
+        securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+        resources:
+          requests: {cpu: 20m, memory: 64Mi}
+          limits: {cpu: 200m, memory: 128Mi}
+        volumeMounts:
+        - {name: tmp, mountPath: /tmp}
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: netdiag-mcp, namespace: mcp-servers}
+spec:
+  selector: {app: netdiag-mcp}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: netdiag-mcp-from-gateway, namespace: mcp-servers}
+spec:
+  podSelector:
+    matchLabels: {app: netdiag-mcp}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: gateways}
+      podSelector:
+        matchLabels: {app: mcp-gateway}
+    ports: [{port: 8080, protocol: TCP}]
+---
+# DNS only, and only for service names (Cilium's "*" stays within one
+# label: exactly service.namespace.svc.cluster.local). Cilium's DNS proxy
+# answers anything else REFUSED itself, so the query never reaches CoreDNS
+# or an upstream resolver: the name's labels go nowhere. No other egress.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: {name: netdiag-mcp-egress, namespace: mcp-servers}
+spec:
+  endpointSelector:
+    matchLabels: {app: netdiag-mcp}
+  egress:
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: kube-system, k8s:k8s-app: kube-dns}
+    toPorts:
+    - ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}]
+      rules:
+        dns: [{matchPattern: "*.*.svc.cluster.local"}]

@@ -13,7 +13,8 @@
 //     still match their pins; anything else is hidden and logged;
 //   - tools/call: the same check, made again against the server's current
 //     descriptors at call time, then forwarded with the server's credential
-//     (added here, never seen by the agent); the result is capped in size;
+//     (added here, never seen by the agent), if its arguments pass the
+//     registry's rules for them (P3-31); the result is capped in size;
 //   - every other method (resources, prompts, sampling, ...) is refused.
 package main
 
@@ -201,12 +202,20 @@ func (g *gateway) serve(w http.ResponseWriter, r *http.Request) {
 		reply(w, msg.ID, out, nil)
 	case "tools/call":
 		var p struct {
-			Name string `json:"name"`
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
 		}
 		json.Unmarshal(msg.Params, &p)
 		if !g.reg.Allowed(id.Username, server, p.Name) {
 			audit("refused", "tool", p.Name, "reason", "not allowed for this identity")
 			reply(w, msg.ID, nil, &rpcError{-32602, fmt.Sprintf("tool %q is not available to %s", p.Name, id.Username)})
+			return
+		}
+		// Arguments are the model's output: whatever it encodes into them
+		// leaves with the call, so only values the registry allows go.
+		if err := srv.CheckArgs(p.Name, p.Arguments); err != nil {
+			audit("refused", "tool", p.Name, "reason", "arguments: "+err.Error(), "argBytes", len(p.Arguments))
+			reply(w, msg.ID, nil, &rpcError{-32602, fmt.Sprintf("tool %q refused by the MCP gateway: %v", p.Name, err)})
 			return
 		}
 		// The pin is checked against what the server advertises now, so a

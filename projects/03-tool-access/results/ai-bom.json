@@ -10,35 +10,42 @@
     },
     "gateways/llm-gateway": {
       "image": "docker.io/library/agent-gateway:dev",
-      "imageID": "docker.io/library/import-2026-10-09@sha256:821f2a1d33d6752953250d7dbd545d1980c3a5e0afae2317acadf02e86b07eec"
+      "imageID": "docker.io/library/import-2026-10-10@sha256:628fbbe6eeb0a68824772f319f9b4c4dd8e64f91432966e9efac3a1cc212d004"
     },
     "gateways/mcp-gateway": {
       "image": "docker.io/library/mcp-gateway:dev",
-      "imageID": "sha256:8212afedde5b046e5cf86b00a15a057964151342380be41bb2a51f1a851673d2"
+      "imageID": "sha256:7e19a8b719e828eb85ecdf43cee9cbb84334d47cf8230d0b85dfa91c331370d6"
     },
     "gateways/mock-model": {
       "image": "docker.io/library/mock-model:dev",
-      "imageID": "sha256:b5bf2eab16e19a694e91b042d02ef97311fc0d467102cd8680e9ca0f4d26f283"
+      "imageID": "sha256:6b67981982e8ee095eec4998918fb317389dd58c5d43d75619203e47eba0b11e"
     },
     "mcp-servers/incident-tracker": {
       "image": "docker.io/library/mcp-tools:dev",
-      "imageID": "docker.io/library/import-2026-10-09@sha256:8d576d2af70e29b708a5919e17158500e3042cbc297c554163a51d8fb6c454b5"
+      "imageID": "docker.io/library/import-2026-10-10@sha256:67b296d676fff078628d31dd25c2d8c758ae8d1b639d8a5038e007e34bd22699"
     },
     "mcp-servers/incidents-mcp": {
       "image": "docker.io/library/mcp-tools:dev",
-      "imageID": "docker.io/library/import-2026-10-09@sha256:8d576d2af70e29b708a5919e17158500e3042cbc297c554163a51d8fb6c454b5"
+      "imageID": "docker.io/library/import-2026-10-10@sha256:67b296d676fff078628d31dd25c2d8c758ae8d1b639d8a5038e007e34bd22699"
+    },
+    "mcp-servers/netdiag-mcp": {
+      "image": "docker.io/library/mcp-tools:dev",
+      "imageID": "docker.io/library/import-2026-10-10@sha256:67b296d676fff078628d31dd25c2d8c758ae8d1b639d8a5038e007e34bd22699"
     },
     "temporal/temporal": {
       "image": "docker.io/temporalio/temporal:1.9.1",
       "imageID": "sha256:e1534f2d0aa0ce2d79375ce20ac15a3405fc51c3e7bd374f4ac204bc94e1252c"
     }
   },
-  "generated": "2026-10-10T08:21:06Z",
+  "generated": "2026-10-10T09:08:15Z",
   "mcpGrants": {
     "system:serviceaccount:agent:proposer": {
       "incidents": [
         "list_open_incidents",
         "get_incident"
+      ],
+      "netdiag": [
+        "resolve"
       ]
     }
   },
@@ -69,11 +76,33 @@
   },
   "tools": {
     "mcp:incidents": {
+      "args": {
+        "get_incident": {
+          "incident_id": {
+            "maxLength": 10,
+            "pattern": "INC-[0-9]{4,6}"
+          }
+        }
+      },
       "pins": {
         "get_incident": "sha256:3a381e2b5a6d91585000af1cbfc18aff1784edc4b64ad77c73ff679839b18256",
         "list_open_incidents": "sha256:d553488ca8e729d4e1e5b1a99f50465ff1615082e9cf040b6f94f8b9530750ad"
       },
       "url": "http://incidents-mcp.mcp-servers.svc.cluster.local:8080/mcp"
+    },
+    "mcp:netdiag": {
+      "args": {
+        "resolve": {
+          "hostname": {
+            "maxLength": 100,
+            "pattern": "[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\\.(workloads)\\.svc\\.cluster\\.local"
+          }
+        }
+      },
+      "pins": {
+        "resolve": "sha256:32d32b7bfec47c199574023de05d4db1143a8b1a6c2dc02bde3f22fa67c8350d"
+      },
+      "url": "http://netdiag-mcp.mcp-servers.svc.cluster.local:8080/mcp"
     },
     "typed actions (agent)": {
       "escalate_to_human": "sha256:8c88a268ac8f8082bdf25aa20a9fac75876529b87b1aa58493aedafd648f32c6",

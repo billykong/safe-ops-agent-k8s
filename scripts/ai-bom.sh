@@ -58,7 +58,7 @@ bom = {
                                           "sha256": sha(open("projects/02-approval-gate/policy/gate.rego", "rb").read())}},
     "tools": {
         "typed actions (agent)": {t["name"]: sha(canon(t)) for t in env["TOOLS"]},
-        **{f"mcp:{name}": {"url": s["url"], "pins": s["tools"]} for name, s in registry["servers"].items()},
+        **{f"mcp:{name}": {"url": s["url"], "pins": s["tools"], "args": s.get("args", {})} for name, s in registry["servers"].items()},
     },
     "mcpGrants": registry["identities"],
     "components": running,
@@ -75,13 +75,14 @@ for n, p in bom["prompts"].items():
 md += ["\n## Policies\n", "| Policy | Source | SHA-256 |", "| --- | --- | --- |"]
 for n, p in bom["policies"].items():
     md.append(f"| {n} | `{p['source']}` | `{p['sha256']}` |")
-md += ["\n## Tools\n", "| Tool | Kind | Pin (SHA-256 of the descriptor) |", "| --- | --- | --- |"]
+md += ["\n## Tools\n", "| Tool | Kind | Pin (SHA-256 of the descriptor) | Arguments allowed (MCP gateway) |", "| --- | --- | --- | --- |"]
 for n, h in bom["tools"]["typed actions (agent)"].items():
-    md.append(f"| `{n}` | typed action, strict schema | `{h}` |")
+    md.append(f"| `{n}` | typed action, strict schema | `{h}` | checked by the agent (`validate`) |")
 for k, v in bom["tools"].items():
     if k.startswith("mcp:"):
         for t, pin in sorted(v["pins"].items()):
-            md.append(f"| `{k[4:]}__{t}` | MCP, via the MCP gateway ({v['url']}) | `{pin}` |")
+            rules = "; ".join(f"`{a}`: `{r['pattern']}`, ≤ {r['maxLength']} bytes" for a, r in sorted(v["args"].get(t, {}).items())) or "none"
+            md.append(f"| `{k[4:]}__{t}` | MCP, via the MCP gateway ({v['url']}) | `{pin}` | {rules} |")
 md += ["\n## Who may use which MCP tools\n"]
 for ident, servers in bom["mcpGrants"].items():
     md.append(f"- `{ident}`: " + "; ".join(f"{s}: {', '.join(t)}" for s, t in servers.items()))

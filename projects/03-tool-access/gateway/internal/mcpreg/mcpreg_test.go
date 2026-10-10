@@ -49,3 +49,45 @@ func TestLoadRejectsUnpinnedGrants(t *testing.T) {
 		t.Errorf("load: %v", err)
 	}
 }
+
+func TestCheckArgs(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "r.json")
+	os.WriteFile(p, []byte(`{"servers":{"s":{"url":"http://x","tools":{"get":"sha256:1","list":"sha256:2"},
+		"args":{"get":{"id":{"pattern":"INC-[0-9]{4,6}","maxLength":10}}}}},"identities":{}}`), 0o600)
+	r, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := r.Servers["s"]
+	for _, c := range []struct {
+		tool, args string
+		ok         bool
+	}{
+		{"get", `{"id":"INC-1001"}`, true},
+		{"get", `{}`, true},
+		{"list", `{}`, true},
+		{"list", ``, true},
+		{"get", `{"id":"INC-1001?acct=7781"}`, false}, // anchored: no trailing data
+		{"get", `{"id":"x INC-1001"}`, false},
+		{"get", `{"id":"INC-1234567"}`, false},
+		{"get", `{"id":1001}`, false},
+		{"get", `{"id":"INC-1001","note":"hi"}`, false}, // no rule, no argument
+		{"list", `{"q":"x"}`, false},
+		{"get", `[1]`, false},
+	} {
+		if err := srv.CheckArgs(c.tool, json.RawMessage(c.args)); (err == nil) != c.ok {
+			t.Errorf("%s %s: err %v, want ok=%v", c.tool, c.args, err, c.ok)
+		}
+	}
+	for _, bad := range []string{
+		`{"servers":{"s":{"url":"u","tools":{"a":"sha256:1"},"args":{"a":{"x":{"pattern":"[a-z]+"}}}}},"identities":{}}`,
+		`{"servers":{"s":{"url":"u","tools":{"a":"sha256:1"},"args":{"a":{"x":{"pattern":"(","maxLength":3}}}}},"identities":{}}`,
+		`{"servers":{"s":{"url":"u","tools":{"a":"sha256:1"},"args":{"b":{"x":{"pattern":"y","maxLength":3}}}}},"identities":{}}`,
+	} {
+		os.WriteFile(p, []byte(bad), 0o600)
+		if _, err := Load(p); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}

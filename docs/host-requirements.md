@@ -18,7 +18,7 @@ Docker Engine and gVisor (`runsc` 20260928.0) from `scripts/setup-host.sh`. The 
 
 ## After a WSL restart or a `.wslconfig` change
 
-The kind node container may not restart on its own (it came back `Exited (128)` once). Then:
+The kind node container may not restart on its own. It came back `Exited (128)` twice. The second time (2026-10-10), `docker inspect` showed why: Docker's restart at boot failed to create the container's systemd scope (`unable to start unit "docker-<id>.scope" ... got failed`), probably because systemd wasn't ready yet. A manual start a few minutes later worked, and the gVisor KVM platform still worked after it. Then:
 
 ```bash
 docker start safe-ops-control-plane

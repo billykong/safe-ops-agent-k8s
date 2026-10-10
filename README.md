@@ -11,7 +11,7 @@ The plan and requirements live in [docs/prd/](docs/prd/README.md). Weaknesses we
 | `cluster/` | kind cluster config (gVisor runtime wired in) |
 | `scripts/` | Host setup and verification helpers |
 | `projects/01-sandboxed-code-exec/` | agent-sandbox + gVisor, hardened sandbox pods, warm-pool latency |
-| `projects/03-tool-access/` | Workload identity per agent; the LLM gateway holding the model key, with per-agent budgets; MCP tools behind a gateway with pinned descriptors |
+| `projects/03-tool-access/` | Workload identity per agent; the LLM gateway holding the model key, with per-agent budgets; MCP tools behind a gateway with pinned descriptors and argument rules; the prompt-injection red-team ([docs/red-team.md](docs/red-team.md)) |
 | `projects/02-approval-gate/` | `ChangeRequest` CRD and approval controller (kubebuilder): the agent proposes, a human approves, the controller applies |
 | `docs/prd/` | Product requirements: goals, architecture, security requirements, roadmap, and per-project requirements with status |
 
@@ -39,6 +39,7 @@ make p3 test-identity          # per-agent identities; gateway tokens: audience,
 make test-llm-gateway          # LLM gateway (mock provider): no key in the agent, policy, budgets, degrade
 make test-mcp                  # MCP gateway: brokered secrets, pinned descriptors, rug pull, agent reads MCP
 make test-policy               # semantic action gate (embedded OPA): allow/escalate/deny on effect
+make red-team                  # prompt injection and exfiltration: which layer stops each attack
 ./scripts/kill-switch.sh stop --reason TEXT   # runbook: docs/runbooks/kill-switch.md
 ./scripts/new-approver.sh NAME # issue an approver certificate; then approvalctl with that kubeconfig
 ```

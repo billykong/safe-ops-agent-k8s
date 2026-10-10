@@ -47,10 +47,10 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 2. **Done.** LLM gateway holding the model key, with per-identity token budgets; the agent loop is model-driven, choosing typed actions through the approval gate (`make p3 test-llm-gateway`).
 3. **Done.** MCP tools behind a gateway brokering their secrets; pinned descriptors, no discovery; AI-BOM (`make p3 test-mcp`, `scripts/ai-bom.sh`).
 4. **Done.** Semantic action gate: OPA's Rego embedded in the approval controller, deciding on each proposal's computed effect (`make test-policy`).
-5. **Next.** Prompt-injection red-team.
+5. **Done.** Prompt-injection red-team: a fully compliant model against every layer, each attack's stopping layer named; exfiltration through approved tools closed by argument rules and DNS fencing (`make red-team`, `docs/red-team.md`). **Phase 3's exit criteria are met.**
 
 ### P4: observability and evals
-1. OTel GenAI traces; Prometheus/Grafana for tokens, cost and escalation rate.
+1. **Next.** OTel GenAI traces; Prometheus/Grafana for tokens, cost and escalation rate.
 2. API audit logging to an agent-unwritable store.
 3. Replay eval suite as Jobs or Argo Workflows; blind judge plus deterministic checks.
 4. Regression gate on merges (CI).
