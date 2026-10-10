@@ -5,6 +5,12 @@ metadata:
   name: approval-controller
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+- apiGroups:
   - approval.safe-ops.io
   resources:
   - changebudgets

@@ -27,7 +27,8 @@ spec:
         # ingress admits no scraper yet, so only a port-forward reaches it
         # (P4 adds scraping, with authentication). One replica, so no
         # leader election.
-        args: ["--metrics-bind-address=:8080", "--metrics-secure=false", "--health-probe-bind-address=0"]
+        args: ["--metrics-bind-address=:8080", "--metrics-secure=false", "--health-probe-bind-address=0",
+               "--policy-file=/etc/safe-ops/policy/gate.rego"]
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
@@ -36,10 +37,15 @@ spec:
           requests: {cpu: 50m, memory: 64Mi}
           limits: {cpu: 500m, memory: 128Mi}
         volumeMounts:
+        # The semantic action gate's policy (policy/gate.rego, published as
+        # ConfigMap approval-policy by `make p2`).
+        - {name: policy, mountPath: /etc/safe-ops/policy, readOnly: true}
         - {name: kube-api, mountPath: /var/run/secrets/kubernetes.io/serviceaccount, readOnly: true}
       # API token projected explicitly for an hour; the automounted one is
       # valid for a year on this cluster (P3 README finding 2).
       volumes:
+      - name: policy
+        configMap: {name: approval-policy, optional: true}
       - name: kube-api
         projected:
           sources:

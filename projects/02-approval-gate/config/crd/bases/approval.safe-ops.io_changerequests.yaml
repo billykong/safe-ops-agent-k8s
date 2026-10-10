@@ -456,6 +456,27 @@ spec:
                       - severity
                       type: object
                     type: array
+                  policy:
+                    description: 'policy: the semantic action gate''s decision on
+                      everything above.'
+                    properties:
+                      policySHA:
+                        description: 'policySHA: the policy text that decided.'
+                        type: string
+                      reasons:
+                        items:
+                          type: string
+                        type: array
+                      result:
+                        description: PolicyResult of the semantic action gate.
+                        enum:
+                        - Allow
+                        - Escalate
+                        - Deny
+                        type: string
+                    required:
+                    - result
+                    type: object
                   rollbackCheck:
                     description: |-
                       rollbackCheck: whether the rollback plan, applied to the dry run's

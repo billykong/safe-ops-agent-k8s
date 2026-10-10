@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp
+.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -153,6 +153,9 @@ p2:
 	# overwritten, so re-deploying can't un-stop a stopped agent.
 	$(KUBECTL) get configmap -n approval-system agent-kill-switch >/dev/null 2>&1 || \
 	  $(KUBECTL) create configmap -n approval-system agent-kill-switch --from-literal=mode=run --from-literal=reason="initial deploy"
+	# The semantic action gate's policy, from git (tests excluded).
+	$(KUBECTL) create configmap -n approval-system approval-policy --from-file=gate.rego=$(P2)/policy/gate.rego \
+	  --dry-run=client -o yaml | $(KUBECTL) apply -f -
 	$(KUBECTL) apply -f $(P2)/config/crd/bases/ -f $(P2)/config/rbac/role.yaml -f $(P2)/manifests/
 	$(KUBECTL) -n approval-system rollout restart deploy/approval-controller
 	$(KUBECTL) -n approval-system rollout status deploy/approval-controller --timeout=120s
@@ -216,6 +219,9 @@ test-llm-gateway:
 
 test-mcp:
 	./scripts/test-mcp.sh
+
+test-policy:
+	./scripts/test-policy.sh
 
 test-budget:
 	./scripts/test-budget.sh

@@ -46,8 +46,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 1. **Done.** Per-agent workload identity: one service account per agent, audience-bound pod-bound tokens, the gateway's TokenReview authentication (`make p3 test-identity`).
 2. **Done.** LLM gateway holding the model key, with per-identity token budgets; the agent loop is model-driven, choosing typed actions through the approval gate (`make p3 test-llm-gateway`).
 3. **Done.** MCP tools behind a gateway brokering their secrets; pinned descriptors, no discovery; AI-BOM (`make p3 test-mcp`, `scripts/ai-bom.sh`).
-4. **Next.** Kyverno or OPA as the semantic action gate.
-5. Prompt-injection red-team.
+4. **Done.** Semantic action gate: OPA's Rego embedded in the approval controller, deciding on each proposal's computed effect (`make test-policy`).
+5. **Next.** Prompt-injection red-team.
 
 ### P4: observability and evals
 1. OTel GenAI traces; Prometheus/Grafana for tokens, cost and escalation rate.
@@ -86,7 +86,7 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 | Build a custom WSL2 kernel with `xt_socket`/TPROXY/`NFT_QUEUE`, or move networking-sensitive work to bare metal? | Not blocking: each missing-module gap so far has a workaround (P1 README findings 4, 6, 19). Revisit on bare metal (P1 M7) |
 | ~~Temporal vs LangGraph `interrupt` for durable execution~~ Temporal: replay-based durability with the guarantees the approval wait needs, and independent of the agent framework chosen in P3. | Resolved (P2 M5) |
 | ~~Approval channel: CLI only, or a Slack-style webhook?~~ CLI (`approvalctl`) with certificate-authenticated approvers; a chat channel only if it can carry the same identity. | Resolved (P2 M2) |
-| Kyverno vs OPA Gatekeeper vs plain ValidatingAdmissionPolicy for the action gate | P3 M4 |
+| ~~Kyverno vs OPA Gatekeeper vs plain ValidatingAdmissionPolicy for the action gate~~ OPA (Rego) embedded in the approval controller: it decides on the computed effect (dry run, blast radius, findings), with no webhook to fail; the VAPs stay as identity and admission guards. | Resolved (P3 M4) |
 | ~~SPIFFE/SPIRE vs projected SA tokens for workload identity~~ Projected tokens: audience-bound, pod-bound, revocable, nothing extra to run. SPIRE only if mutual TLS (P3-24) or workloads outside Kubernetes need it. | Resolved (P3 M1) |
 | Does the NVIDIA device plugin work on WSL2's `/dev/dxg` with k3s? | P5 M2 |
 | ~~The kind node sees `/dev/kvm`. Does Kata work there?~~ Yes, with Cloud Hypervisor (QEMU needs `vhost_vsock`, absent from the WSL2 kernel). gVisor's KVM platform is untried. | Resolved (P1 M7) |

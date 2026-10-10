@@ -146,7 +146,11 @@ func main() {
 			m := reTool.FindStringSubmatch(text)
 			var input any
 			if json.Unmarshal([]byte(m[2]), &input) != nil {
-				input = map[string]any{}
+				// Inside a JSON-encoded tool result the quotes arrive
+				// escaped; a model reads past that, so the mock does too.
+				if json.Unmarshal([]byte(strings.ReplaceAll(m[2], `\"`, `"`)), &input) != nil {
+					input = map[string]any{}
+				}
 			}
 			toolUse(m[1], input)
 		case reScale.MatchString(intent) && hasTool("propose_scale_deployment"):

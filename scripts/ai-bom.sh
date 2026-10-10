@@ -54,6 +54,8 @@ bom = {
     },
     "prompts": {"agent system prompt": {"source": "projects/02-approval-gate/durable/agent/model.py (SYSTEM)",
                                          "sha256": sha(env["SYSTEM"].encode())}},
+    "policies": {"semantic action gate": {"source": "projects/02-approval-gate/policy/gate.rego",
+                                          "sha256": sha(open("projects/02-approval-gate/policy/gate.rego", "rb").read())}},
     "tools": {
         "typed actions (agent)": {t["name"]: sha(canon(t)) for t in env["TOOLS"]},
         **{f"mcp:{name}": {"url": s["url"], "pins": s["tools"]} for name, s in registry["servers"].items()},
@@ -69,6 +71,9 @@ md = [f"# AI bill of materials\n\nGenerated {bom['generated']} by `scripts/ai-bo
       f"| LLM gateway allows | {', '.join(f'`{m}`' for m in bom['models']['gatewayAllows'])} | upstream `{bom['models']['provider']}` |",
       "\n## Prompts\n", "| Prompt | Source | SHA-256 |", "| --- | --- | --- |"]
 for n, p in bom["prompts"].items():
+    md.append(f"| {n} | `{p['source']}` | `{p['sha256']}` |")
+md += ["\n## Policies\n", "| Policy | Source | SHA-256 |", "| --- | --- | --- |"]
+for n, p in bom["policies"].items():
     md.append(f"| {n} | `{p['source']}` | `{p['sha256']}` |")
 md += ["\n## Tools\n", "| Tool | Kind | Pin (SHA-256 of the descriptor) |", "| --- | --- | --- |"]
 for n, h in bom["tools"]["typed actions (agent)"].items():
