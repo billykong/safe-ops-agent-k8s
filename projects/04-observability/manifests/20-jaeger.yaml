@@ -1,0 +1,102 @@
+# Jaeger v2 (P4-01): the trace store and its UI, in memory (a restart
+# empties it; a lab trade-off). Only the collector writes to it, and only
+# Grafana (and a port-forward) reads it.
+#
+# 2.20, not 2.21: 2.21 removed the v1 HTTP query endpoints its own UI no
+# longer calls (/api/services, /api/traces?service=...), and Grafana's
+# Jaeger datasource still calls them (P4 README finding).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger
+  namespace: observability
+data:
+  config.yaml: |
+    service:
+      extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [jaeger_storage_exporter]
+      telemetry:
+        metrics:
+          level: none
+    extensions:
+      healthcheckv2:
+        use_v2: true
+        http:
+          endpoint: 0.0.0.0:13133
+      jaeger_query:
+        storage:
+          traces: memstore
+        http:
+          endpoint: 0.0.0.0:16686
+        grpc:
+          endpoint: 127.0.0.1:16685
+      jaeger_storage:
+        backends:
+          memstore:
+            memory:
+              max_traces: 20000
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+    processors:
+      batch: {}
+    exporters:
+      jaeger_storage_exporter:
+        trace_storage: memstore
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: jaeger}
+  template:
+    metadata:
+      labels: {app: jaeger}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: jaeger
+        image: jaegertracing/jaeger:2.20.0
+        imagePullPolicy: IfNotPresent
+        args: ["--config=/etc/jaeger/config.yaml"]
+        ports:
+        - {name: otlp-grpc, containerPort: 4317}
+        - {name: query, containerPort: 16686}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        resources:
+          requests: {cpu: 20m, memory: 64Mi}
+          limits: {cpu: 500m, memory: 512Mi}
+        volumeMounts:
+        - {name: config, mountPath: /etc/jaeger, readOnly: true}
+      volumes:
+      - name: config
+        configMap: {name: jaeger}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+  namespace: observability
+spec:
+  selector: {app: jaeger}
+  ports:
+  - {name: otlp-grpc, port: 4317, targetPort: otlp-grpc}
+  - {name: query, port: 16686, targetPort: query}

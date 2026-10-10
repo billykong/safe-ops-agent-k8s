@@ -7,8 +7,10 @@ import signal
 from concurrent.futures import ThreadPoolExecutor
 
 from temporalio.client import Client
+from temporalio.contrib.opentelemetry import TracingInterceptor
 from temporalio.worker import Worker
 
+import telemetry
 from activities import await_decision, log, propose
 from model import decide, observe
 from shared import TASK_QUEUE
@@ -26,7 +28,15 @@ async def main():
     loop = asyncio.get_running_loop()
     for s in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(s, stop.set)
-    connect = asyncio.ensure_future(Client.connect(ADDRESS, namespace=NAMESPACE))
+    # Traces (P4-01): Temporal's tracing interceptor puts the workflows and
+    # activities of one task in one trace, with the model and tool calls
+    # inside. The interceptor rather than the newer plugin: its spans are
+    # exported as they happen, and a task can wait an hour for approval.
+    # Workflows are started from the CLI, with no trace of their own, so
+    # the workflow creates the root span.
+    telemetry.setup()
+    connect = asyncio.ensure_future(Client.connect(ADDRESS, namespace=NAMESPACE, interceptors=[
+        TracingInterceptor(always_create_workflow_spans=True)]))
     stopping = asyncio.ensure_future(stop.wait())
     await asyncio.wait([connect, stopping], return_when=asyncio.FIRST_COMPLETED)
     if not connect.done():
@@ -41,6 +51,7 @@ async def main():
             log("worker_started", address=ADDRESS, namespace=NAMESPACE, task_queue=TASK_QUEUE)
             await stop.wait()
             log("worker_stopping")
+    telemetry.shutdown()
 
 
 if __name__ == "__main__":

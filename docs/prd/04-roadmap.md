@@ -50,8 +50,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 5. **Done.** Prompt-injection red-team: a fully compliant model against every layer, each attack's stopping layer named; exfiltration through approved tools closed by argument rules and DNS fencing (`make red-team`, `docs/red-team.md`). **Phase 3's exit criteria are met.**
 
 ### P4: observability and evals
-1. **Next.** OTel GenAI traces; Prometheus/Grafana for tokens, cost and escalation rate.
-2. API audit logging to an agent-unwritable store.
+1. **Done.** OTel GenAI traces, one per task from model call to `ChangeRequest`, content kept out by the collector; Prometheus/Grafana for tokens, cost and escalation rate (`make p4 test-observability`).
+2. **Next.** API audit logging to an agent-unwritable store.
 3. Replay eval suite as Jobs or Argo Workflows; blind judge plus deterministic checks.
 4. Regression gate on merges (CI).
 5. Oversight and safety metrics; kill-switch test in the suite.

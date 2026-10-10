@@ -9,6 +9,7 @@ Weaknesses we know about, have reproduced, and haven't closed yet. Each has an I
 | [GAP-03](#gap-03-temporals-frontend-has-no-authentication) | Temporal's frontend has no authentication | Low (only the agent's worker can reach it, and it can already do what the API allows) | Open (accepted for the dev server) | [P2-30](prd/projects/p2-approval-gate.md) |
 | [GAP-04](#gap-04-agent-to-gateway-traffic-is-plaintext) | Agent-to-gateway traffic is plaintext | Low on one node; Medium on multi-node clusters | Open | [P3-24](prd/projects/p3-tool-identity-policy.md) |
 | [GAP-05](#gap-05-narrow-channels-through-allowed-tool-arguments) | Narrow channels through allowed tool arguments | Low (about 20 bits a call, to the incident tracker only) | Open (accepted) | [P3-31](prd/projects/p3-tool-identity-policy.md) |
+| [GAP-06](#gap-06-the-collector-cant-tell-who-sent-a-span) | The collector can't tell who sent a span | Low (traces are a debugging aid; the numbers that matter are scraped from the gateways and controller) | Open | [P4-01](prd/projects/p4-observability-evals.md) |
 
 ## GAP-01: domain fronting through the PyPI egress allowlist
 
@@ -160,3 +161,32 @@ About 20 bits per call, to the tracker only: at most 3 lookups a turn and 6 mode
 ### Status
 
 Open, accepted for now. Revisit when a tool with a free-text argument or an external destination is added.
+
+## GAP-06: the collector can't tell who sent a span
+
+**Found:** 2026-10-10, P4 milestone 1. **Reproduced by:** `make test-observability`, reported as `GAP GAP-06`.
+
+### What's wrong
+
+The OpenTelemetry collector accepts OTLP from the agent's worker, the two gateways and the approval controller (network policy), but it doesn't authenticate them, and a span's service is whatever its sender's resource says. The suite sends a span from the agent's pod with `service.name: llm-gateway`, and Jaeger stores it as the gateway's. A compromised agent could add spans that appear to come from the gateways or the controller to any trace: a "gateway" span saying a call was refused, or a "policy gate" span with a different result.
+
+### Impact
+
+Misleading traces, not wrong numbers or a way out:
+- The figures that matter are scraped by Prometheus from the gateways and the controller, which the agent can't reach. That covers tokens, cost, refusals, gate decisions and oversight.
+- The collector's allowlist still strips content from forged spans (P4-03), and nothing in `observability` reaches outside the cluster.
+- The record of what happened is the ChangeRequest's status and the gateways' audit logs, not the trace.
+
+The agent's own metrics (tasks, escalations, model calls) can be inflated the same way; the dashboard compares its model-call count with the gateway's.
+
+### Options
+
+| Option | Closes it? | Cost |
+| --- | --- | --- |
+| The collector's `k8s_attributes` processor stamps each span with the pod it came from (by connection IP); dashboards and queries trust that, not `service.name` | Makes forgery visible | Read access to pods for the collector; queries change |
+| One OTLP endpoint per sender, each authenticated (`bearertokenauth` with projected tokens, or mTLS), and a processor that sets `service.name` from the endpoint | Yes | A token or certificate per sender; more collector config |
+| Accept: traces are for debugging, the records live elsewhere | No | None |
+
+### Status
+
+Open. Revisit before traces are used for anything but debugging, such as audit (milestone 2) or evals (milestone 3).

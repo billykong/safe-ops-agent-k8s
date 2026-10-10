@@ -1,0 +1,92 @@
+# The senders' side (P4): each instrumented workload may resolve and reach
+# the collector (and nothing else in observability), and the metrics
+# ports admit Prometheus only. Additive to each namespace's own policies.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agent-worker-to-collector
+  namespace: agent
+spec:
+  endpointSelector:
+    matchLabels: {app: agent-worker}
+  egress:
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: kube-system, k8s:k8s-app: kube-dns}
+    toPorts:
+    - ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}]
+      rules:
+        dns:
+        - matchName: otel-collector.observability.svc.cluster.local
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: observability, app: otel-collector}
+    toPorts: [{ports: [{port: "4318", protocol: TCP}]}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gateways-to-collector
+  namespace: gateways
+spec:
+  endpointSelector:
+    matchExpressions: [{key: app, operator: In, values: [llm-gateway, mcp-gateway]}]
+  egress:
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: kube-system, k8s:k8s-app: kube-dns}
+    toPorts:
+    - ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}]
+      rules:
+        dns:
+        - matchName: otel-collector.observability.svc.cluster.local
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: observability, app: otel-collector}
+    toPorts: [{ports: [{port: "4318", protocol: TCP}]}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: controller-to-collector
+  namespace: approval-system
+spec:
+  endpointSelector:
+    matchLabels: {app: approval-controller}
+  egress:
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: kube-system, k8s:k8s-app: kube-dns}
+    toPorts:
+    - ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}]
+      rules:
+        dns:
+        - matchName: otel-collector.observability.svc.cluster.local
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: observability, app: otel-collector}
+    toPorts: [{ports: [{port: "4318", protocol: TCP}]}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-metrics-from-prometheus
+  namespace: gateways
+spec:
+  podSelector:
+    matchExpressions: [{key: app, operator: In, values: [llm-gateway, mcp-gateway]}]
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: observability}}
+      podSelector: {matchLabels: {app: prometheus}}
+    ports: [{port: 9090, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: controller-metrics-from-prometheus
+  namespace: approval-system
+spec:
+  podSelector:
+    matchLabels: {app: approval-controller}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: observability}}
+      podSelector: {matchLabels: {app: prometheus}}
+    ports: [{port: 8443, protocol: TCP}]

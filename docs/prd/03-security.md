@@ -63,7 +63,7 @@ Reference documents (read 2026-09-29):
 | SEC-34 | `ResourceQuota`/`LimitRange` and caps on concurrent sandboxes and warm-pool size. | Should | **Partial**: per-pod limits and pids limit done; quotas planned |
 | SEC-35 | Mutual authentication between components (Cilium mutual auth or a mesh). | Could | Planned (P3) |
 | SEC-36 | Kubernetes API audit logging captures the agent's identity, shipped to a store the agent can't write or delete. | Should | Planned (P4) |
-| SEC-37 | Trace content capture (prompts, tool outputs) off or redacted by default. | Should | Planned (P4) |
+| SEC-37 | Trace content capture (prompts, tool outputs) off or redacted by default. | Should | **Done** in P4 M1: no sender records content, and the collector deletes any span attribute not on its allowlist: `make test-observability` |
 | SEC-38 | Each `ChangeRequest` carries a declared scope (namespaces, kinds); policy rejects actions outside it even if approved. | Should | **Done** in the controller: `make test-approval`; a policy engine joins in P3 |
 | SEC-39 | GPU access never via `privileged: true`; the untrusted-code sandbox never gets a GPU; NVIDIA Container Toolkit kept patched. | Must | Planned (P5) |
 

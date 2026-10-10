@@ -13,6 +13,8 @@ spec:
     spec:
       serviceAccountName: approval-controller
       automountServiceAccountToken: false
+      dnsConfig:
+        options: [{name: ndots, value: "1"}]
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
@@ -22,13 +24,20 @@ spec:
         image: approval-controller:dev
         imagePullPolicy: Never
         # Health endpoint off: kubelet HTTP probes are dropped as "world" on
-        # this cluster (P1 README finding 6). Metrics on, for the oversight
-        # metrics (P2-42), over plain HTTP: the namespace's default-deny
-        # ingress admits no scraper yet, so only a port-forward reaches it
-        # (P4 adds scraping, with authentication). One replica, so no
-        # leader election.
-        args: ["--metrics-bind-address=:8080", "--metrics-secure=false", "--health-probe-bind-address=0",
+        # this cluster (P1 README finding 6). Metrics (oversight, P2-42;
+        # gate decisions, P4-02) over HTTPS with a self-signed certificate,
+        # and each scrape authenticated and authorized by the API server
+        # (TokenReview, SubjectAccessReview on GET /metrics): Prometheus's
+        # identity may, the agents' may not. Only Prometheus can connect
+        # (P4 network policy). One replica, so no leader election.
+        args: ["--metrics-bind-address=:8443", "--health-probe-bind-address=0",
                "--policy-file=/etc/safe-ops/policy/gate.rego"]
+        # Traces (P4-01) go to the collector, the only name this pod may
+        # resolve (P4's network policy).
+        env:
+        - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://otel-collector.observability.svc.cluster.local:4318"}
+        ports:
+        - {name: metrics, containerPort: 8443}
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
@@ -52,3 +61,13 @@ spec:
           - serviceAccountToken: {expirationSeconds: 3600, path: token}
           - configMap: {name: kube-root-ca.crt, items: [{key: ca.crt, path: ca.crt}]}
           - downwardAPI: {items: [{path: namespace, fieldRef: {fieldPath: metadata.namespace}}]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: approval-controller-metrics
+  namespace: approval-system
+spec:
+  selector: {app: approval-controller}
+  ports:
+  - {name: metrics, port: 8443, targetPort: metrics}

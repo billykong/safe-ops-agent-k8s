@@ -1,0 +1,124 @@
+# Prometheus (P4-02): scrapes the gateways and the approval controller,
+# and takes the agent's OTLP metrics from the collector (its OTLP
+# endpoint, which only the collector can reach). Data on an emptyDir for
+# 7 days: a restart empties it (a lab trade-off).
+#
+# The controller's metrics need a token: its endpoint authenticates and
+# authorizes each scrape (TokenReview, SubjectAccessReview), and this
+# identity may get /metrics and nothing else. The gateways' metrics are
+# on a port that only this pod may reach (network policy).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: observability
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: safe-ops-metrics-reader
+rules:
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-metrics-reader
+subjects:
+- {kind: ServiceAccount, name: prometheus, namespace: observability}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: safe-ops-metrics-reader}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus
+  namespace: observability
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    otlp:
+      translation_strategy: UnderscoreEscapingWithSuffixes
+    scrape_configs:
+    - job_name: llm-gateway
+      static_configs: [{targets: [llm-gateway.gateways.svc.cluster.local:9090]}]
+    - job_name: mcp-gateway
+      static_configs: [{targets: [mcp-gateway.gateways.svc.cluster.local:9090]}]
+    - job_name: approval-controller
+      scheme: https
+      # controller-runtime's self-signed serving certificate (P2 manifests).
+      tls_config: {insecure_skip_verify: true}
+      authorization:
+        credentials_file: /var/run/secrets/safe-ops.io/prometheus/token
+      static_configs: [{targets: [approval-controller-metrics.approval-system.svc.cluster.local:8443]}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: observability
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: prometheus}
+  template:
+    metadata:
+      labels: {app: prometheus}
+    spec:
+      serviceAccountName: prometheus
+      automountServiceAccountToken: false
+      dnsConfig:
+        options: [{name: ndots, value: "1"}]
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: prometheus
+        image: prom/prometheus:v3.13.3
+        imagePullPolicy: IfNotPresent
+        args:
+        - --config.file=/etc/prometheus/prometheus.yml
+        - --storage.tsdb.path=/prometheus
+        - --storage.tsdb.retention.time=7d
+        - --web.enable-otlp-receiver
+        ports:
+        - {name: http, containerPort: 9090}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        resources:
+          requests: {cpu: 50m, memory: 128Mi}
+          limits: {cpu: "1", memory: 512Mi}
+        volumeMounts:
+        - {name: config, mountPath: /etc/prometheus, readOnly: true}
+        - {name: data, mountPath: /prometheus}
+        - {name: token, mountPath: /var/run/secrets/safe-ops.io/prometheus, readOnly: true}
+      volumes:
+      - name: config
+        configMap: {name: prometheus}
+      - name: data
+        emptyDir: {sizeLimit: 2Gi}
+      # For the controller's metrics endpoint: the API server's audience
+      # (it runs a TokenReview), an hour, refreshed by the kubelet.
+      - name: token
+        projected:
+          sources:
+          - serviceAccountToken: {expirationSeconds: 3600, path: token}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: observability
+spec:
+  selector: {app: prometheus}
+  ports:
+  - {name: http, port: 9090, targetPort: http}

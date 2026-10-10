@@ -1,0 +1,133 @@
+# observability: default deny. Senders reach the collector only; the
+# collector writes to Jaeger and Prometheus; Prometheus scrapes the
+# gateways' and controller's metrics ports; Grafana reads Prometheus and
+# Jaeger. Nothing here reaches outside the cluster, so telemetry is not a
+# way out for whatever the agent writes into it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: observability
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: collector-from-senders
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels: {app: otel-collector}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: agent}}
+      podSelector: {matchLabels: {app: agent-worker}}
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: gateways}}
+      podSelector: {matchExpressions: [{key: app, operator: In, values: [llm-gateway, mcp-gateway]}]}
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: approval-system}}
+      podSelector: {matchLabels: {app: approval-controller}}
+    ports:
+    - {port: 4318, protocol: TCP}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: jaeger-from-collector-and-grafana
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels: {app: jaeger}
+  policyTypes: [Ingress]
+  ingress:
+  - from: [{podSelector: {matchLabels: {app: otel-collector}}}]
+    ports: [{port: 4317, protocol: TCP}]
+  - from: [{podSelector: {matchLabels: {app: grafana}}}]
+    ports: [{port: 16686, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prometheus-from-collector-and-grafana
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels: {app: prometheus}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector: {matchLabels: {app: otel-collector}}
+    - podSelector: {matchLabels: {app: grafana}}
+    ports: [{port: 9090, protocol: TCP}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: collector-egress
+  namespace: observability
+spec:
+  endpointSelector:
+    matchLabels: {app: otel-collector}
+  egress:
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: kube-system, k8s:k8s-app: kube-dns}
+    toPorts:
+    - ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}]
+      rules:
+        dns:
+        - matchName: jaeger.observability.svc.cluster.local
+        - matchName: prometheus.observability.svc.cluster.local
+  - toEndpoints: [{matchLabels: {app: jaeger}}]
+    toPorts: [{ports: [{port: "4317", protocol: TCP}]}]
+  - toEndpoints: [{matchLabels: {app: prometheus}}]
+    toPorts: [{ports: [{port: "9090", protocol: TCP}]}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: prometheus-egress
+  namespace: observability
+spec:
+  endpointSelector:
+    matchLabels: {app: prometheus}
+  egress:
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: kube-system, k8s:k8s-app: kube-dns}
+    toPorts:
+    - ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}]
+      rules:
+        dns:
+        - matchName: llm-gateway.gateways.svc.cluster.local
+        - matchName: mcp-gateway.gateways.svc.cluster.local
+        - matchName: approval-controller-metrics.approval-system.svc.cluster.local
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: gateways, app: llm-gateway}
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: gateways, app: mcp-gateway}
+    toPorts: [{ports: [{port: "9090", protocol: TCP}]}]
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: approval-system, app: approval-controller}
+    toPorts: [{ports: [{port: "8443", protocol: TCP}]}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: grafana-egress
+  namespace: observability
+spec:
+  endpointSelector:
+    matchLabels: {app: grafana}
+  egress:
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: kube-system, k8s:k8s-app: kube-dns}
+    toPorts:
+    - ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}]
+      rules:
+        dns:
+        - matchName: prometheus.observability.svc.cluster.local
+        - matchName: jaeger.observability.svc.cluster.local
+  - toEndpoints: [{matchLabels: {app: prometheus}}]
+    toPorts: [{ports: [{port: "9090", protocol: TCP}]}]
+  - toEndpoints: [{matchLabels: {app: jaeger}}]
+    toPorts: [{ports: [{port: "16686", protocol: TCP}]}]

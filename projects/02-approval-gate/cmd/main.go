@@ -29,6 +29,7 @@ import (
 	"github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/internal/controller"
 	"github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/internal/gate"
 	"github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/internal/oversight"
+	"github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/internal/telemetry"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -182,6 +183,16 @@ func main() {
 	if err != nil {
 		setupLog.Error(err, "Failed to start manager")
 		os.Exit(1)
+	}
+
+	// Traces (P4-01): the gate's decisions and each request's outcome, in
+	// the proposing task's trace. Off unless OTEL_EXPORTER_OTLP_ENDPOINT
+	// is set.
+	shutdownTracing, err := telemetry.Setup(context.Background(), "approval-controller")
+	if err != nil {
+		setupLog.Error(err, "tracing disabled")
+	} else {
+		defer shutdownTracing(context.Background())
 	}
 
 	// The semantic action gate's policy (P3-10). If it can't be loaded the

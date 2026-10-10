@@ -16,10 +16,16 @@
 //     (added here, never seen by the agent), if its arguments pass the
 //     registry's rules for them (P3-31); the result is capped in size;
 //   - every other method (resources, prompts, sampling, ...) is refused.
+//
+// Every request gets a span in the agent's trace (P4-01: "tools/call
+// <tool>", with the outcome and why a call was refused, never its
+// arguments or result) and is counted in Prometheus metrics on a
+// separate port (P4-02).
 package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,11 +37,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
 	"github.com/billykong/safe-ops-agent-k8s/projects/03-tool-access/gateway/internal/authn"
 	"github.com/billykong/safe-ops-agent-k8s/projects/03-tool-access/gateway/internal/mcpreg"
+	"github.com/billykong/safe-ops-agent-k8s/projects/03-tool-access/gateway/internal/telemetry"
 )
 
 const maxBody = 256 << 10
@@ -46,6 +58,8 @@ type gateway struct {
 	reg       *mcpreg.Registry
 	client    *http.Client
 	maxResult int
+	requests  *prometheus.CounterVec
+	toolCalls *prometheus.CounterVec
 }
 
 type rpcMsg struct {
@@ -96,11 +110,45 @@ func main() {
 	for id := range reg.Identities {
 		allowed = append(allowed, id)
 	}
+	shutdown, err := telemetry.Setup(context.Background(), "mcp-gateway")
+	if err != nil {
+		fail("telemetry", err)
+	}
+	defer shutdown(context.Background())
+	// Labels are bounded: registered servers and tools, or "other"; a
+	// fixed set of methods and outcomes.
+	metricsReg := prometheus.NewRegistry()
 	g := &gateway{
+		requests: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "safeops_mcp_requests_total",
+			Help: "MCP requests by identity, server, method and outcome."}, []string{"identity", "server", "method", "outcome"}),
+		toolCalls: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "safeops_mcp_tool_calls_total",
+			Help: "tools/call requests by identity, server, tool and outcome (ok, or which check refused it)."},
+			[]string{"identity", "server", "tool", "outcome"}),
 		log: log, reg: reg, client: client, maxResult: maxResult,
 		authn: &authn.Authenticator{Reviewer: cs.AuthenticationV1().TokenReviews(),
 			Audience: env("AUDIENCE", "mcp-gateway.safe-ops.io"), Allowed: allowed, CacheTTL: ttl},
 	}
+	metricsReg.MustRegister(g.requests, g.toolCalls)
+	// Series start at zero for every granted tool, so a series' first
+	// increase is counted.
+	for _, id := range allowed {
+		for name, srv := range reg.Servers {
+			for tool := range srv.Tools {
+				if reg.Allowed(id, name, tool) {
+					g.toolCalls.WithLabelValues(id, name, tool, "ok")
+					g.requests.WithLabelValues(id, name, "tools/call", "ok")
+				}
+			}
+		}
+	}
+	go func() {
+		mm := http.NewServeMux()
+		mm.Handle("GET /metrics", promhttp.HandlerFor(metricsReg, promhttp.HandlerOpts{}))
+		ms := &http.Server{Addr: env("METRICS_LISTEN", ":9090"), Handler: mm, ReadHeaderTimeout: 5 * time.Second}
+		if err := ms.ListenAndServe(); err != nil {
+			fail("metrics", err)
+		}
+	}()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
 	mux.HandleFunc("POST /mcp/{server}", g.serve)
@@ -118,14 +166,25 @@ func main() {
 func (g *gateway) serve(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	server := r.PathValue("server")
+	ctx, span := telemetry.Tracer().Start(telemetry.Extract(r), "mcp", trace.WithSpanKind(trace.SpanKindServer))
+	defer span.End()
+	r = r.WithContext(ctx)
+	var (
+		id      authn.Identity
+		msg     rpcMsg
+		tool    string
+		outcome = "ok"
+	)
+	defer func() { g.record(span, id.Username, server, msg.Method, tool, outcome) }()
 	id, err := g.authn.Authenticate(r.Context(), r)
 	if err != nil {
 		code := http.StatusServiceUnavailable
+		outcome = "auth_unavailable"
 		switch {
 		case errors.Is(err, authn.ErrUnauthenticated):
-			code = http.StatusUnauthorized
+			code, outcome = http.StatusUnauthorized, "unauthenticated"
 		case errors.Is(err, authn.ErrForbidden):
-			code = http.StatusForbidden
+			code, outcome = http.StatusForbidden, "forbidden"
 		}
 		g.log.Info("mcp", "server", server, "status", code, "identity", id.Username, "reason", err.Error())
 		http.Error(w, err.Error(), code)
@@ -133,17 +192,19 @@ func (g *gateway) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	srv, known := g.reg.Servers[server]
 	if !known || !g.reg.HasServer(id.Username, server) {
+		outcome = "refused_server"
 		g.log.Info("mcp", "server", server, "status", 403, "identity", id.Username, "reason", "server not allowed for this identity")
 		http.Error(w, fmt.Sprintf("%s may not use MCP server %q", id.Username, server), http.StatusForbidden)
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
 	if err != nil || len(body) > maxBody {
+		outcome = "bad_request"
 		http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
 		return
 	}
-	var msg rpcMsg
 	if err := json.Unmarshal(body, &msg); err != nil || msg.JSONRPC != "2.0" {
+		outcome = "bad_request"
 		http.Error(w, "one JSON-RPC 2.0 message per request (no batches)", http.StatusBadRequest)
 		return
 	}
@@ -161,6 +222,7 @@ func (g *gateway) serve(w http.ResponseWriter, r *http.Request) {
 	case "initialize":
 		res, err := g.upstream(srv, body, fwd, false)
 		if err != nil {
+			outcome = "upstream_error"
 			audit("upstream error", "reason", err.Error())
 			reply(w, msg.ID, nil, &rpcError{-32000, "tool server unavailable: " + err.Error()})
 			return
@@ -183,6 +245,7 @@ func (g *gateway) serve(w http.ResponseWriter, r *http.Request) {
 	case "tools/list":
 		tools, verdicts, err := g.verified(srv, fwd)
 		if err != nil {
+			outcome = "upstream_error"
 			audit("upstream error", "reason", err.Error())
 			reply(w, msg.ID, nil, &rpcError{-32000, "tool server unavailable: " + err.Error()})
 			return
@@ -206,7 +269,9 @@ func (g *gateway) serve(w http.ResponseWriter, r *http.Request) {
 			Arguments json.RawMessage `json:"arguments"`
 		}
 		json.Unmarshal(msg.Params, &p)
+		tool = p.Name
 		if !g.reg.Allowed(id.Username, server, p.Name) {
+			outcome = "refused_grant"
 			audit("refused", "tool", p.Name, "reason", "not allowed for this identity")
 			reply(w, msg.ID, nil, &rpcError{-32602, fmt.Sprintf("tool %q is not available to %s", p.Name, id.Username)})
 			return
@@ -214,6 +279,7 @@ func (g *gateway) serve(w http.ResponseWriter, r *http.Request) {
 		// Arguments are the model's output: whatever it encodes into them
 		// leaves with the call, so only values the registry allows go.
 		if err := srv.CheckArgs(p.Name, p.Arguments); err != nil {
+			outcome = "refused_arguments"
 			audit("refused", "tool", p.Name, "reason", "arguments: "+err.Error(), "argBytes", len(p.Arguments))
 			reply(w, msg.ID, nil, &rpcError{-32602, fmt.Sprintf("tool %q refused by the MCP gateway: %v", p.Name, err)})
 			return
@@ -222,6 +288,7 @@ func (g *gateway) serve(w http.ResponseWriter, r *http.Request) {
 		// server that changed since the agent listed its tools is caught.
 		_, verdicts, err := g.verified(srv, fwd)
 		if err != nil {
+			outcome = "upstream_error"
 			audit("upstream error", "tool", p.Name, "reason", err.Error())
 			reply(w, msg.ID, nil, &rpcError{-32000, "tool server unavailable: " + err.Error()})
 			return
@@ -233,6 +300,7 @@ func (g *gateway) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if status != "ok" {
+			outcome = "refused_pin"
 			g.log.Warn("mcp descriptor rejected", "server", server, "tool", p.Name, "status", status)
 			audit("refused", "tool", p.Name, "reason", "descriptor "+status)
 			reply(w, msg.ID, nil, &rpcError{-32602, fmt.Sprintf("tool %q refused: its descriptor is %s (doesn't match the pinned one)", p.Name, status)})
@@ -240,6 +308,7 @@ func (g *gateway) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		res, err := g.upstream(srv, body, fwd, true)
 		if err != nil {
+			outcome = "upstream_error"
 			audit("upstream error", "tool", p.Name, "reason", err.Error())
 			reply(w, msg.ID, nil, &rpcError{-32000, "tool server unavailable: " + err.Error()})
 			return
@@ -248,8 +317,44 @@ func (g *gateway) serve(w http.ResponseWriter, r *http.Request) {
 		audit("ok", "tool", p.Name, "resultBytes", n, "truncated", truncated)
 		reply(w, msg.ID, capped, nil)
 	default:
+		outcome = "refused_method"
 		audit("refused", "reason", "method not allowed")
 		reply(w, msg.ID, nil, &rpcError{-32601, fmt.Sprintf("method %q is not available through the MCP gateway", msg.Method)})
+	}
+}
+
+// record counts the request and names and closes out its span. Server,
+// method and tool are the agent's text, so only registered values are
+// used as they are; anything else is "other".
+func (g *gateway) record(span trace.Span, identity, server, method, tool, outcome string) {
+	srv, known := g.reg.Servers[server]
+	if !known {
+		server = "other"
+	}
+	switch method {
+	case "initialize", "tools/list", "tools/call", "ping", "notifications/initialized", "notifications/cancelled", "":
+	default:
+		method = "other"
+	}
+	if _, ok := srv.Tools[tool]; !ok && tool != "" {
+		tool = "other"
+	}
+	g.requests.WithLabelValues(identity, server, method, outcome).Inc()
+	name := method
+	span.SetAttributes(attribute.String("mcp.method.name", method), attribute.String("safeops.mcp.server", server),
+		attribute.String("safeops.identity", identity), attribute.String("safeops.outcome", outcome))
+	if method == "tools/call" {
+		g.toolCalls.WithLabelValues(identity, server, tool, outcome).Inc()
+		name = "tools/call " + server + "__" + tool
+		span.SetAttributes(attribute.String("gen_ai.operation.name", "execute_tool"), attribute.String("gen_ai.tool.name", server+"__"+tool))
+	}
+	if name == "" || name == "other" {
+		name = "mcp " + name // no method, or one the gateway refuses
+	}
+	span.SetName(name)
+	if outcome != "ok" {
+		span.SetAttributes(attribute.String("error.type", outcome))
+		span.SetStatus(codes.Error, outcome)
 	}
 }
 

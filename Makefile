@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team
+.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -233,3 +233,30 @@ test-budget:
 
 test-kill-switch:
 	./scripts/test-kill-switch.sh
+
+# P4 milestone 1: telemetry. The collector, Jaeger, Prometheus and Grafana
+# in namespace observability; the agent, gateways and controller send to
+# the collector once their own targets (durable, p3, p2) are redeployed.
+P4 := projects/04-observability
+OTELCOL_VERSION    ?= 0.161.0
+JAEGER_VERSION     ?= 2.20.0
+PROMETHEUS_VERSION ?= v3.13.3
+GRAFANA_VERSION    ?= 13.2.2
+p4:
+	$(call preload,otel/opentelemetry-collector-k8s:$(OTELCOL_VERSION))
+	$(call preload,jaegertracing/jaeger:$(JAEGER_VERSION))
+	$(call preload,prom/prometheus:$(PROMETHEUS_VERSION))
+	$(call preload,grafana/grafana:$(GRAFANA_VERSION))
+	$(KUBECTL) apply -f $(P4)/manifests/00-namespace.yaml
+	# Grafana's admin password: random, created once (viewing needs none).
+	$(KUBECTL) get secret -n observability grafana-admin >/dev/null 2>&1 || \
+	  $(KUBECTL) create secret generic -n observability grafana-admin --from-literal=password=$$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')
+	# The dashboards, from git.
+	$(KUBECTL) create configmap -n observability grafana-dashboards --from-file=$(P4)/dashboards/ \
+	  --dry-run=client -o yaml | $(KUBECTL) apply -f -
+	$(KUBECTL) apply -f $(P4)/manifests/
+	$(KUBECTL) -n observability rollout restart deploy/otel-collector deploy/jaeger deploy/prometheus deploy/grafana
+	for d in otel-collector jaeger prometheus grafana; do $(KUBECTL) -n observability rollout status deploy/$$d --timeout=180s || exit 1; done
+
+test-observability:
+	./scripts/test-observability.sh

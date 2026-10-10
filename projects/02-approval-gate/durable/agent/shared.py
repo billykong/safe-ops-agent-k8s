@@ -106,6 +106,9 @@ class ModelDecision:
     request_id: str = ""
     # MCP tools the model read before deciding (server__tool), in order.
     tools_used: list = field(default_factory=list)
+    # Why it escalated, in one word (model_chose, invalid_output,
+    # step_limit, ...); "" when it proposed a change.
+    escalation: str = ""
 
 
 @dataclass

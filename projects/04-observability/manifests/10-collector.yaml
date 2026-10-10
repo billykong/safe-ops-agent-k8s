@@ -1,0 +1,118 @@
+# The OpenTelemetry collector (P4-01, P4-03): the one place telemetry
+# enters. OTLP/HTTP in; traces out to Jaeger, the agent's OTLP metrics to
+# Prometheus's OTLP endpoint.
+#
+# Content stays out of traces (P4-03). The senders don't record it, and
+# the collector enforces that independently: every span attribute not on
+# the allowlist below is deleted, and span events keep only their name and
+# exception type. The agent is semi-trusted (its inputs are attacker
+# text), so its telemetry is too: a compromised agent could otherwise
+# write prompts or customer data into the trace store, where operators
+# read them. What survives is names, ids, counts and outcomes.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector
+  namespace: observability
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+            max_request_body_size: 4194304
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 160
+        spike_limit_mib: 40
+      transform/allowlist:
+        error_mode: ignore
+        # One group per context: in a single group, OTTL infers the
+        # narrowest context (span events) for every statement, and the span
+        # statement would then run only on spans that have events.
+        trace_statements:
+        - context: span
+          statements:
+          - keep_matching_keys(span.attributes, "^(gen_ai\\.(operation\\.name|provider\\.name|agent\\.name|request\\.model|request\\.max_tokens|response\\.id|response\\.model|response\\.finish_reasons|usage\\.input_tokens|usage\\.output_tokens|usage\\.cache_read\\.input_tokens|usage\\.cache_creation\\.input_tokens|tool\\.name|tool\\.type|tool\\.call\\.id)|safeops\\.(task|target|prompt_sha|decision|escalation|tools_used|tool\\.result_bytes|identity|outcome|cost_usd|mcp\\.server|changerequest|action|policy\\.result|policy\\.sha|review\\.findings|replicas\\.before|replicas\\.after|dry_run\\.accepted|phase|settled_by|seconds_to_decision)|mcp\\.method\\.name|error\\.type|server\\.address|temporal(WorkflowID|RunID|ActivityID|ActivityType|UpdateID))$")
+        - context: spanevent
+          statements:
+          - keep_matching_keys(spanevent.attributes, "^exception\\.type$")
+      batch: {}
+    exporters:
+      otlp_grpc/jaeger:
+        endpoint: jaeger.observability.svc.cluster.local:4317
+        tls: {insecure: true}
+      otlp_http/prometheus:
+        metrics_endpoint: http://prometheus.observability.svc.cluster.local:9090/api/v1/otlp/v1/metrics
+        tls: {insecure: true}
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, transform/allowlist, batch]
+          exporters: [otlp_grpc/jaeger]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlp_http/prometheus]
+      telemetry:
+        metrics:
+          level: none
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: otel-collector}
+  template:
+    metadata:
+      labels: {app: otel-collector}
+    spec:
+      automountServiceAccountToken: false
+      # Cilium's DNS proxy answers only the exporters' names.
+      dnsConfig:
+        options: [{name: ndots, value: "1"}]
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: collector
+        image: otel/opentelemetry-collector-k8s:0.161.0
+        imagePullPolicy: IfNotPresent
+        args: ["--config=/etc/otelcol/config.yaml"]
+        ports:
+        - {name: otlp-http, containerPort: 4318}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        resources:
+          requests: {cpu: 20m, memory: 64Mi}
+          limits: {cpu: 500m, memory: 200Mi}
+        volumeMounts:
+        - {name: config, mountPath: /etc/otelcol, readOnly: true}
+      volumes:
+      - name: config
+        configMap: {name: otel-collector}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: observability
+spec:
+  selector: {app: otel-collector}
+  ports:
+  - {name: otlp-http, port: 4318, targetPort: otlp-http}

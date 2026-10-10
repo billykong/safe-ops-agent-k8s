@@ -1,0 +1,11 @@
+# observability: where telemetry goes (P4). The agents, gateways and
+# controller can send to the collector and nothing else here; only the
+# collector writes to the stores, and nothing here reaches outside the
+# cluster.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
