@@ -62,7 +62,7 @@ Reference documents (read 2026-09-29):
 | SEC-33 | Pod Security Admission `restricted` on agent and sandbox namespaces; read-only rootfs, non-root, dropped capabilities, seccomp `RuntimeDefault`. | Must | **Partial**: namespace labels set; pod settings checked by `make verify`; PSA rejection not tested |
 | SEC-34 | `ResourceQuota`/`LimitRange` and caps on concurrent sandboxes and warm-pool size. | Should | **Partial**: per-pod limits and pids limit done; quotas planned |
 | SEC-35 | Mutual authentication between components (Cilium mutual auth or a mesh). | Could | Planned (P3) |
-| SEC-36 | Kubernetes API audit logging captures the agent's identity, shipped to a store the agent can't write or delete. | Should | Planned (P4) |
+| SEC-36 | Kubernetes API audit logging captures the agent's identity, shipped to a store the agent can't write or delete. | Should | **Done** in P4 M2: the agent's requests (with pod and token id) and changes to guard configuration, over mTLS to a hash-chained sink in namespace `audit` and a root-only node log; tampering and admission changes alert: `make test-audit`. Outage limit: GAP-07 |
 | SEC-37 | Trace content capture (prompts, tool outputs) off or redacted by default. | Should | **Done** in P4 M1: no sender records content, and the collector deletes any span attribute not on its allowlist: `make test-observability` |
 | SEC-38 | Each `ChangeRequest` carries a declared scope (namespaces, kinds); policy rejects actions outside it even if approved. | Should | **Done** in the controller: `make test-approval`; a policy engine joins in P3 |
 | SEC-39 | GPU access never via `privileged: true`; the untrusted-code sandbox never gets a GPU; NVIDIA Container Toolkit kept patched. | Must | Planned (P5) |

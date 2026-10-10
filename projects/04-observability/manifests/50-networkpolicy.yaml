@@ -102,6 +102,8 @@ spec:
         - matchName: llm-gateway.gateways.svc.cluster.local
         - matchName: mcp-gateway.gateways.svc.cluster.local
         - matchName: approval-controller-metrics.approval-system.svc.cluster.local
+        - matchName: audit-sink.audit.svc.cluster.local
+        - matchName: kubernetes.default.svc.cluster.local
   - toEndpoints:
     - matchLabels: {k8s:io.kubernetes.pod.namespace: gateways, app: llm-gateway}
     - matchLabels: {k8s:io.kubernetes.pod.namespace: gateways, app: mcp-gateway}
@@ -109,6 +111,11 @@ spec:
   - toEndpoints:
     - matchLabels: {k8s:io.kubernetes.pod.namespace: approval-system, app: approval-controller}
     toPorts: [{ports: [{port: "8443", protocol: TCP}]}]
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: audit, app: audit-sink}
+    toPorts: [{ports: [{port: "9090", protocol: TCP}]}]
+  - toEntities: [kube-apiserver]
+    toPorts: [{ports: [{port: "6443", protocol: TCP}]}]
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

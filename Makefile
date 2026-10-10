@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability
+.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability audit test-audit
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -260,3 +260,14 @@ p4:
 
 test-observability:
 	./scripts/test-observability.sh
+
+# P4 milestone 2: the API server's audit log (P4-04), to the audit sink in
+# namespace audit and to a file on the node. Restarts the API server when
+# the audit configuration changes. Run after `make p4` (Prometheus's
+# alerts read the sink).
+audit:
+	$(MAKE) -C $(P4)/audit-sink kind-load CLUSTER=$(CLUSTER)
+	./scripts/audit-setup.sh
+
+test-audit:
+	./scripts/test-audit.sh
