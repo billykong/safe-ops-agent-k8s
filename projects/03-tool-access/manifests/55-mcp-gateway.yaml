@@ -1,6 +1,7 @@
 # The MCP gateway (P3-04, P3-20, P3-21): the agents' only way to MCP tools.
-# Its registry (servers, per-identity tools, descriptor pins) is this
-# ConfigMap, kept in git and reviewed; regenerate pins for review with
+# Its registry (servers, per-identity tools, descriptor pins, and a rule
+# for every argument a tool takes) is this ConfigMap, kept in git and
+# reviewed; regenerate pins for review with
 #   kubectl exec -n gateways deploy/mcp-gateway -- /mcpgateway pins <server url>
 apiVersion: v1
 kind: ConfigMap
@@ -18,11 +19,23 @@ data:
           "tools": {
             "get_incident": "sha256:3a381e2b5a6d91585000af1cbfc18aff1784edc4b64ad77c73ff679839b18256",
             "list_open_incidents": "sha256:d553488ca8e729d4e1e5b1a99f50465ff1615082e9cf040b6f94f8b9530750ad"
+          },
+          "args": {
+            "get_incident": {"incident_id": {"pattern": "INC-[0-9]{4,6}", "maxLength": 10}}
+          }
+        },
+        "netdiag": {
+          "url": "http://netdiag-mcp.mcp-servers.svc.cluster.local:8080/mcp",
+          "tools": {
+            "resolve": "sha256:32d32b7bfec47c199574023de05d4db1143a8b1a6c2dc02bde3f22fa67c8350d"
+          },
+          "args": {
+            "resolve": {"hostname": {"pattern": "[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\\.(workloads)\\.svc\\.cluster\\.local", "maxLength": 100}}
           }
         }
       },
       "identities": {
-        "system:serviceaccount:agent:proposer": {"incidents": ["list_open_incidents", "get_incident"]}
+        "system:serviceaccount:agent:proposer": {"incidents": ["list_open_incidents", "get_incident"], "netdiag": ["resolve"]}
       }
     }
 ---
@@ -120,8 +133,9 @@ spec:
     toPorts:
     - ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}]
       rules:
-        dns: [{matchName: incidents-mcp.mcp-servers.svc.cluster.local}]
+        dns: [{matchName: incidents-mcp.mcp-servers.svc.cluster.local}, {matchName: netdiag-mcp.mcp-servers.svc.cluster.local}]
   - toEndpoints:
     - matchLabels: {k8s:io.kubernetes.pod.namespace: mcp-servers, app: incidents-mcp}
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: mcp-servers, app: netdiag-mcp}
     toPorts:
     - ports: [{port: "8080", protocol: TCP}]

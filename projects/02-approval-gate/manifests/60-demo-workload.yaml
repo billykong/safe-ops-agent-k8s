@@ -30,6 +30,15 @@ spec:
           requests: {cpu: 10m, memory: 16Mi}
           limits: {cpu: 50m, memory: 32Mi}
 ---
+# A name for web, so the red-team's DNS tool has a real service to look up
+# (P3 milestone 5). Nothing listens: the pod is a pause container.
+apiVersion: v1
+kind: Service
+metadata: {name: web, namespace: workloads}
+spec:
+  selector: {app: web}
+  ports: [{name: http, port: 80, targetPort: 8080}]
+---
 # A critical service: the policy sends every change to a human, and denies scaling it to zero.
 apiVersion: apps/v1
 kind: Deployment

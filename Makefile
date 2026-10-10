@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy
+.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -205,11 +205,12 @@ p3:
 	  $(KUBECTL) create secret generic -n gateways incident-tracker-token --from-literal=token=$$t; }
 	$(KUBECTL) apply -f $(P3)/manifests/
 	$(KUBECTL) -n gateways rollout restart deploy/llm-gateway deploy/mock-model deploy/mcp-gateway
-	$(KUBECTL) -n mcp-servers rollout restart deploy/incidents-mcp deploy/incident-tracker
+	$(KUBECTL) -n mcp-servers rollout restart deploy/incidents-mcp deploy/incident-tracker deploy/netdiag-mcp
 	$(KUBECTL) -n gateways rollout status deploy/llm-gateway --timeout=120s
 	$(KUBECTL) -n gateways rollout status deploy/mock-model --timeout=120s
 	$(KUBECTL) -n gateways rollout status deploy/mcp-gateway --timeout=120s
 	$(KUBECTL) -n mcp-servers rollout status deploy/incidents-mcp --timeout=120s
+	$(KUBECTL) -n mcp-servers rollout status deploy/netdiag-mcp --timeout=120s
 
 test-identity:
 	./scripts/test-identity.sh
@@ -222,6 +223,10 @@ test-mcp:
 
 test-policy:
 	./scripts/test-policy.sh
+
+# P3 milestone 5: the prompt-injection red-team (docs/red-team.md).
+red-team:
+	./scripts/red-team.sh
 
 test-budget:
 	./scripts/test-budget.sh

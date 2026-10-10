@@ -8,6 +8,7 @@ Weaknesses we know about, have reproduced, and haven't closed yet. Each has an I
 | [GAP-02](#gap-02-admission-guards-cant-protect-their-own-configuration) | Admission guards can't protect their own configuration | Low today (the agent has no such RBAC); critical if that RBAC is ever granted | Open (inherent; mitigated by RBAC tests) | [P2-13, P2-14, P2-21](prd/projects/p2-approval-gate.md) |
 | [GAP-03](#gap-03-temporals-frontend-has-no-authentication) | Temporal's frontend has no authentication | Low (only the agent's worker can reach it, and it can already do what the API allows) | Open (accepted for the dev server) | [P2-30](prd/projects/p2-approval-gate.md) |
 | [GAP-04](#gap-04-agent-to-gateway-traffic-is-plaintext) | Agent-to-gateway traffic is plaintext | Low on one node; Medium on multi-node clusters | Open | [P3-24](prd/projects/p3-tool-identity-policy.md) |
+| [GAP-05](#gap-05-narrow-channels-through-allowed-tool-arguments) | Narrow channels through allowed tool arguments | Low (about 20 bits a call, to the incident tracker only) | Open (accepted) | [P3-31](prd/projects/p3-tool-identity-policy.md) |
 
 ## GAP-01: domain fronting through the PyPI egress allowlist
 
@@ -135,3 +136,27 @@ Limited by the token's design: it's valid only for the gateway's audience (the A
 ### Status
 
 Open. Planned with P3-24 (mutual authentication), once the gateway carries model traffic.
+
+## GAP-05: narrow channels through allowed tool arguments
+
+**Found:** 2026-10-10, P3 milestone 5. **Reproduced by:** `make red-team`, attack RT-16, reported as `GAP GAP-05`.
+
+### What's wrong
+
+The MCP gateway refuses a tool argument that doesn't match its rule in the registry. That closed the wide channels: a DNS name under an attacker's domain (RT-10) and an incident id with data appended (RT-12). But an argument that matches still carries whatever its allowed values can encode. `get_incident` accepts `INC-` and 4 to 6 digits, so a model following an injection can ask for `INC-778142`, and the tracker (an external SaaS in this design) receives those digits in its request path, logs them, and answers 404.
+
+### Impact
+
+About 20 bits per call, to the tracker only: at most 3 lookups a turn and 6 model calls per decision is under 50 bytes a decision, and each call is in the gateway's audit log with the identity and pod. Exploiting it needs both an injection the model obeys and access to the tracker's logs (its operator, or an attacker who has compromised it). `resolve` has the same property inside the cluster (a service-name label of up to 63 characters), but that name reaches only the cluster's DNS (RT-13).
+
+### Options
+
+| Option | Closes it? | Cost |
+| --- | --- | --- |
+| Validate values against what exists (the gateway checks the id against `list_open_incidents` before forwarding) | Yes for ids: only real records can be asked for | A lookup per call; the gateway learns each tool's semantics |
+| Rate and anomaly limits on tool calls (repeated 404s, unusual ids) | Narrows it and makes it visible | Thresholds to tune |
+| Accept and watch: the audit log names every call | No | None |
+
+### Status
+
+Open, accepted for now. Revisit when a tool with a free-text argument or an external destination is added.

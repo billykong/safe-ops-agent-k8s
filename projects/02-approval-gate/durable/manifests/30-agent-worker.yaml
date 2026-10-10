@@ -35,7 +35,7 @@ spec:
         - {name: LLM_GATEWAY_URL, value: "http://llm-gateway.gateways.svc.cluster.local:8080"}
         - {name: LLM_GATEWAY_TOKEN_FILE, value: /var/run/secrets/safe-ops.io/llm-gateway/token}
         # MCP tools, only through the MCP gateway (P3-04): server=url pairs.
-        - {name: MCP_SERVERS, value: "incidents=http://mcp-gateway.gateways.svc.cluster.local:8080/mcp/incidents"}
+        - {name: MCP_SERVERS, value: "incidents=http://mcp-gateway.gateways.svc.cluster.local:8080/mcp/incidents,netdiag=http://mcp-gateway.gateways.svc.cluster.local:8080/mcp/netdiag"}
         - {name: MCP_GATEWAY_TOKEN_FILE, value: /var/run/secrets/safe-ops.io/mcp-gateway/token}
         securityContext:
           allowPrivilegeEscalation: false
