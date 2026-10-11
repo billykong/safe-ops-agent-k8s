@@ -314,6 +314,11 @@ func stats(ctx context.Context, c client.Client, ns string) {
 	fmt.Printf("settled by: humans %d, change budget %d, controller %d, expiry %d, kill switch %d\n",
 		r.ByHuman, r.ByBudget, r.ByController, r.Expired, r.Cancelled)
 	fmt.Printf("re-proposed after drift: %d\n", r.Reproposed)
+	reopen := "-"
+	if r.Applied > 0 {
+		reopen = fmt.Sprintf("%.0f%%", 100*float64(r.Reopened)/float64(r.Applied))
+	}
+	fmt.Printf("applied: %d, reopened within %s: %d (%s)\n", r.Applied, oversight.ReopenWindow, r.Reopened, reopen)
 	fmt.Printf("time to decision: humans median %s, p90 %s; change budget median %s\n\n",
 		dur(oversight.Quantile(r.HumanSeconds, 0.5)), dur(oversight.Quantile(r.HumanSeconds, 0.9)), dur(oversight.Quantile(r.BudgetSeconds, 0.5)))
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)

@@ -113,3 +113,24 @@ metadata:
 subjects:
 - {kind: ServiceAccount, name: approval-controller, namespace: approval-system}
 roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: approval-controller}
+---
+# The approval controller reads EvalRuns to export the latest result as
+# metrics (P4-22), next to its oversight metrics: read only, and only here.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: approval-controller-read-evalruns
+  namespace: evals
+rules:
+- apiGroups: [evals.safe-ops.io]
+  resources: [evalruns]
+  verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: approval-controller-read-evalruns
+  namespace: evals
+subjects:
+- {kind: ServiceAccount, name: approval-controller, namespace: approval-system}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: approval-controller-read-evalruns}

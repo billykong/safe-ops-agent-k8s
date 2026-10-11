@@ -1,6 +1,6 @@
 {
  "uid": "safe-ops-agent",
- "title": "Safe-ops agent: cost, escalation, audit, traces",
+ "title": "Safe-ops agent: cost, escalation, quality, oversight, audit, traces",
  "tags": [
   "safe-ops",
   "p4"
@@ -14,7 +14,7 @@
   "from": "now-1h",
   "to": "now"
  },
- "description": "P4 milestone 1: tokens, estimated cost and escalation rate from the gateways, the approval controller and the agent; traces from Jaeger. P4 milestone 2: the API audit log's counters and the sink's chain.",
+ "description": "P4 milestone 1: tokens, estimated cost and escalation rate from the gateways, the approval controller and the agent; traces from Jaeger. P4 milestone 2: the API audit log's counters and the sink's chain. P4 milestone 5: quality next to throughput (eval results, reopen rate) and oversight health, from records the agent can't write.",
  "panels": [
   {
    "id": 1,
@@ -1663,6 +1663,703 @@
    }
   },
   {
+   "id": 34,
+   "type": "row",
+   "title": "Quality next to throughput (P4-22)",
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 56
+   },
+   "panels": []
+  },
+  {
+   "id": 35,
+   "type": "stat",
+   "title": "Agent tasks (throughput)",
+   "description": "Decisions the agent made in the range (agent-reported). Read it next to the quality figures on this row, which come from records the agent can't write.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 0,
+    "y": 57
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(increase(safeops_agent_tasks_total[$__range]))",
+     "instant": true
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "noValue": "0",
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 36,
+   "type": "stat",
+   "title": "Changes applied",
+   "description": "Applied ChangeRequests kept in the cluster (approval controller, from the records).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 4,
+    "y": 57
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max(safeops_changerequests_applied)",
+     "instant": true
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "noValue": "0",
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 37,
+   "type": "stat",
+   "title": "Eval pass rate (latest run)",
+   "description": "Scenarios passed in the latest replay eval run (EvalRun, written only by the evaluator).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 8,
+    "y": 57
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(safeops_eval_last_run_scenarios{result=\"passed\"}) / sum(safeops_eval_last_run_scenarios)",
+     "instant": true
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "noValue": "no eval run",
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 0.7
+       },
+       {
+        "color": "green",
+        "value": 0.85
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 38,
+   "type": "stat",
+   "title": "Eval safety (latest run)",
+   "description": "Whether safety held in every scenario of the latest eval run: nothing changed a target without a human, and the gate allowed nothing a scenario expects stopped.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 12,
+    "y": 57
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "min(safeops_eval_last_run_safety_held)",
+     "instant": true
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "background",
+    "graphMode": "none",
+    "textMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "noValue": "no eval run",
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "1": {
+         "text": "held",
+         "color": "green"
+        },
+        "0": {
+         "text": "NOT HELD",
+         "color": "red"
+        }
+       }
+      }
+     ],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 39,
+   "type": "stat",
+   "title": "Reopen rate",
+   "description": "Applied changes followed within an hour by another proposal for the same target: the change didn't settle it (P4-20).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 16,
+    "y": 57
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max(safeops_changerequests_reopened) / max(safeops_changerequests_applied)",
+     "instant": true
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "noValue": "0",
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 0.1
+       },
+       {
+        "color": "red",
+        "value": 0.2
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 40,
+   "type": "stat",
+   "title": "Oversight and quality alerts firing",
+   "description": "RubberStampApprovals, CriticalFindingApproved, ChangesReopened, EvalSafetyNotHeld (Prometheus rules).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 20,
+    "y": 57
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "count(ALERTS{alertstate=\"firing\",alertname=~\"RubberStampApprovals|CriticalFindingApproved|ChangesReopened|EvalSafetyNotHeld\"})",
+     "instant": true
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "noValue": "0",
+     "mappings": [],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 41,
+   "type": "stat",
+   "title": "Latest eval run, by scenario",
+   "description": "Each scenario's result in the latest eval run. Known failures are in the gate's baseline (evals/baseline-mock.yaml).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 24,
+    "x": 0,
+    "y": 61
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (scenario) (safeops_eval_scenario_passed)",
+     "instant": true,
+     "legendFormat": "{{scenario}}"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "background",
+    "graphMode": "none",
+    "textMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "noValue": "no eval run",
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "1": {
+         "text": "pass",
+         "color": "green"
+        },
+        "0": {
+         "text": "fail",
+         "color": "red"
+        }
+       }
+      }
+     ],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 42,
+   "type": "row",
+   "title": "Oversight health (P4-21): from the ChangeRequests kept in the cluster",
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 65
+   },
+   "panels": []
+  },
+  {
+   "id": 43,
+   "type": "bargauge",
+   "title": "Approval rate by approver",
+   "description": "Approved / decided. Near 100% with short reviews fires RubberStampApprovals (at least 10 decisions, median under 30s).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 6,
+    "x": 0,
+    "y": 66
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (approver) (safeops_approver_decisions{decision=\"approved\"}) / sum by (approver) (safeops_approver_decisions)",
+     "instant": true,
+     "legendFormat": "{{approver}}"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "orientation": "horizontal",
+    "displayMode": "basic",
+    "showUnfilled": true
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 0.95
+       }
+      ]
+     },
+     "min": 0,
+     "max": 1
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 44,
+   "type": "bargauge",
+   "title": "Median time to decide, by approver",
+   "description": "Seconds from proposal to the approver's decision (median).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 6,
+    "x": 6,
+    "y": 66
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (approver) (safeops_approver_decision_seconds{quantile=\"0.5\"})",
+     "instant": true,
+     "legendFormat": "{{approver}}"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "orientation": "horizontal",
+    "displayMode": "basic",
+    "showUnfilled": true
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "orange",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 30
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 45,
+   "type": "bargauge",
+   "title": "Approvals of flagged requests",
+   "description": "Approvals of requests whose review packet had a Warning or Critical finding. Critical ones are overrides (--accept-critical).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 6,
+    "x": 12,
+    "y": 66
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (approver, severity) (safeops_approver_approvals_flagged) > 0",
+     "instant": true,
+     "legendFormat": "{{approver}} ({{severity}})"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "orientation": "horizontal",
+    "displayMode": "basic",
+    "showUnfilled": true
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "orange",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 46,
+   "type": "bargauge",
+   "title": "Settled by",
+   "description": "Final ChangeRequests by what settled them: humans, the change budget, the controller, expiry, the kill switch.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 6,
+    "x": 18,
+    "y": 66
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (settled_by) (safeops_changerequest_outcomes)",
+     "instant": true,
+     "legendFormat": "{{settled_by}}"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "orientation": "horizontal",
+    "displayMode": "basic",
+    "showUnfilled": true
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "blue",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
    "id": 24,
    "type": "table",
    "title": "Recent agent traces",
@@ -1675,7 +2372,7 @@
     "h": 9,
     "w": 24,
     "x": 0,
-    "y": 56
+    "y": 74
    },
    "targets": [
     {

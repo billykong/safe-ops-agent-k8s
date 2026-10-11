@@ -11,8 +11,10 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -221,6 +223,22 @@ func main() {
 		var l approvalv1alpha1.ChangeRequestList
 		err := mgr.GetClient().List(ctx, &l)
 		return l.Items, err
+	}))
+	// Quality next to throughput (P4-22): the latest eval run, read from
+	// the EvalRuns the evaluator wrote (P4-12). Uncached and namespaced:
+	// the controller may only get and list them in evals, granted by P4's
+	// manifests, and runs without them.
+	metrics.Registry.MustRegister(oversight.NewEvalCollector(func(ctx context.Context) ([]oversight.EvalRun, bool) {
+		var l unstructured.UnstructuredList
+		l.SetGroupVersionKind(schema.GroupVersionKind{Group: "evals.safe-ops.io", Version: "v1alpha1", Kind: "EvalRunList"})
+		if err := mgr.GetAPIReader().List(ctx, &l, client.InNamespace("evals")); err != nil {
+			return nil, false
+		}
+		runs := make([]oversight.EvalRun, 0, len(l.Items))
+		for _, u := range l.Items {
+			runs = append(runs, oversight.ParseEvalRun(u))
+		}
+		return runs, true
 	}))
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

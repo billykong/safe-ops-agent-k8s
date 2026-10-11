@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability audit test-audit evals test-evals ci-stack eval-gate test-eval-gate
+.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability audit test-audit evals test-evals ci-stack eval-gate test-eval-gate eval-kill-switch test-oversight
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -304,3 +304,13 @@ eval-gate:
 
 test-eval-gate:
 	./scripts/test-eval-gate.sh
+
+# P4 milestone 5: the kill-switch drill (P4-14), run in the eval suite after
+# the gate (CI too): stops the agent mid-work, checks every layer, resumes it
+# and runs the gate again. test-oversight checks the drill and the oversight
+# and quality metrics (P4-20..22); it needs `make p4` too.
+eval-kill-switch:
+	./scripts/eval-kill-switch.sh
+
+test-oversight:
+	./scripts/test-oversight.sh

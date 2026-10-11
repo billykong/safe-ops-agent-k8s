@@ -1,10 +1,13 @@
-"""Run in the agent's pod by scripts/test-observability.sh, as a
-compromised agent would act:
+"""Run in the agent's pod by scripts/test-observability.sh and
+scripts/test-oversight.sh, as a compromised agent would act:
 
   span TRACE_ID CANARY [SERVICE]
                          send one span to the collector carrying CANARY in
                          content attributes and an exception event (P4-03),
                          as SERVICE (default safe-ops-agent; GAP-06)
+  metric NAME VALUE [SERVICE]
+                         send one gauge to the collector (P4-22: only the
+                         agent's own metric names get through)
   connect HOST PORT      try a TCP connection; prints "connected" or why not
 
 Standard library only."""
@@ -16,6 +19,7 @@ import time
 import urllib.request
 
 COLLECTOR = "http://otel-collector.observability.svc.cluster.local:4318/v1/traces"
+METRICS = "http://otel-collector.observability.svc.cluster.local:4318/v1/metrics"
 
 mode = sys.argv[1]
 if mode == "span":
@@ -36,6 +40,20 @@ if mode == "span":
         }]}],
     }]}
     req = urllib.request.Request(COLLECTOR, data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        print(r.status)
+elif mode == "metric":
+    name, value = sys.argv[2], float(sys.argv[3])
+    service = sys.argv[4] if len(sys.argv) > 4 else "safe-ops-agent"
+    body = {"resourceMetrics": [{
+        "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": service}}]},
+        "scopeMetrics": [{"scope": {"name": "forgery-probe"}, "metrics": [{
+            "name": name,
+            "gauge": {"dataPoints": [{"timeUnixNano": str(time.time_ns()), "asDouble": value}]},
+        }]}],
+    }]}
+    req = urllib.request.Request(METRICS, data=json.dumps(body).encode(), method="POST",
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=10) as r:
         print(r.status)

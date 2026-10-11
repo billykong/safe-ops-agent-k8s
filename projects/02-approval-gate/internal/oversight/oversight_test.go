@@ -6,6 +6,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	v1 "github.com/billykong/safe-ops-agent-k8s/projects/02-approval-gate/api/v1alpha1"
 )
@@ -56,5 +57,63 @@ func TestCompute(t *testing.T) {
 	}
 	if !math.IsNaN(Quantile(nil, 0.5)) || Quantile([]float64{1, 2, 3, 4}, 0.9) != 3.7 {
 		t.Error("Quantile")
+	}
+}
+
+func TestReopened(t *testing.T) {
+	at := func(name, target string, phase v1.Phase, proposed, applied time.Duration) v1.ChangeRequest {
+		p := metav1.NewTime(t0.Add(proposed))
+		c := v1.ChangeRequest{Status: v1.ChangeRequestStatus{Phase: phase, ProposedAt: &p}}
+		c.Name = name
+		c.Spec.Action.Target = v1.TargetRef{Kind: "Deployment", Namespace: "workloads", Name: target}
+		if phase == v1.PhaseApplied {
+			a := metav1.NewTime(t0.Add(applied))
+			c.Status.AppliedAt = &a
+		}
+		return c
+	}
+	items := []v1.ChangeRequest{
+		at("web-1", "web", v1.PhaseApplied, 0, time.Minute),    // web-2 follows 9m after: reopened
+		at("web-2", "web", v1.PhasePending, 10*time.Minute, 0), // not applied
+		at("api-1", "api", v1.PhaseApplied, 0, time.Minute),    // api-2 is 2h later: not reopened
+		at("api-2", "api", v1.PhaseApplied, 2*time.Hour, 2*time.Hour+time.Minute),
+		at("db-1", "db", v1.PhaseApplied, 0, time.Minute), // other targets don't count
+	}
+	r := Compute(items)
+	if r.Applied != 4 || r.Reopened != 1 {
+		t.Fatalf("applied %d reopened %d, want 4 and 1", r.Applied, r.Reopened)
+	}
+}
+
+func TestLatestEvalRun(t *testing.T) {
+	run := func(name, finished string, passed int64, held string) unstructured.Unstructured {
+		u := unstructured.Unstructured{Object: map[string]any{
+			"spec": map[string]any{
+				"finishedAt": finished,
+				"summary":    map[string]any{"total": int64(3), "passed": passed, "disagreements": int64(1), "safetyHeld": held},
+				"scenarios": []any{
+					map[string]any{"id": "a", "passed": true, "safetyHeld": true},
+					map[string]any{"id": "b", "passed": false, "safetyHeld": held == "true"},
+				},
+			}}}
+		u.SetName(name)
+		return u
+	}
+	var runs []EvalRun
+	for _, u := range []unstructured.Unstructured{
+		run("old", "2026-10-07T09:00:00Z", 3, "true"),
+		run("new", "2026-10-08T09:00:00Z", 2, "false"),
+	} {
+		runs = append(runs, ParseEvalRun(u))
+	}
+	r, ok := Latest(runs)
+	if !ok || r.Name != "new" || r.Total != 3 || r.Passed != 2 || r.Disagreements != 1 || r.SafetyHeld {
+		t.Fatalf("latest: %+v", r)
+	}
+	if len(r.Scenarios) != 2 || !r.Scenarios[0].Passed || r.Scenarios[1].Passed || r.Scenarios[1].SafetyHeld {
+		t.Errorf("scenarios: %+v", r.Scenarios)
+	}
+	if _, ok := Latest(nil); ok {
+		t.Error("Latest(nil) found a run")
 	}
 }

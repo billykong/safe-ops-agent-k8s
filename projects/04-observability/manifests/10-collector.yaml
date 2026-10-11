@@ -9,6 +9,13 @@
 # text), so its telemetry is too: a compromised agent could otherwise
 # write prompts or customer data into the trace store, where operators
 # read them. What survives is names, ids, counts and outcomes.
+#
+# Metrics through here are the agent's own (P4-22): the collector drops
+# every metric not named as the agent's (safeops.agent.*, gen_ai.client.*).
+# The numbers oversight and quality are judged by (ChangeRequests, gate
+# decisions, eval results, tokens and cost) are scraped from the
+# components that enforce them, and a sender here can't add a series
+# under their names.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -39,6 +46,11 @@ data:
         - context: spanevent
           statements:
           - keep_matching_keys(spanevent.attributes, "^exception\\.type$")
+      filter/agent-metrics:
+        error_mode: ignore
+        metrics:
+          metric:
+          - 'not IsMatch(name, "^(safeops\\.agent\\.|gen_ai\\.client\\.)")'
       batch: {}
     exporters:
       otlp_grpc/jaeger:
@@ -59,7 +71,7 @@ data:
           exporters: [otlp_grpc/jaeger]
         metrics:
           receivers: [otlp]
-          processors: [memory_limiter, batch]
+          processors: [memory_limiter, filter/agent-metrics, batch]
           exporters: [otlp_http/prometheus]
       telemetry:
         metrics:

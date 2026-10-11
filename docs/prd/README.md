@@ -24,7 +24,7 @@ This folder is the product requirements document (PRD) for the whole project: wh
 | P1 Sandboxed code execution | **Phase 1 complete**: milestones 1-8 done, all Must requirements Done |
 | P2 Approval gate | **Phase 2 complete**: milestones 1-6 done, exit criteria met |
 | P3 Tool identity and policy | **Phase 3 complete**: milestones 1-5 done, exit criteria met |
-| P4 Observability and evals | Milestones 1-4 (telemetry, API audit log, replay evals, CI regression gate) done; 5 (oversight and safety metrics) next |
+| P4 Observability and evals | Milestones 1-5 done (telemetry, API audit log, replay evals, CI regression gate, oversight and quality metrics with a kill-switch drill); P4-15 (seeded known-bad proposals) open |
 | P5 Local inference | Not started |
 
 ## Conventions
