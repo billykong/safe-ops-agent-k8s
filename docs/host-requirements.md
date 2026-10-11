@@ -16,6 +16,16 @@ The cluster runs in kind on WSL2, on a host that's also used for other work. The
 
 Docker Engine and gVisor (`runsc` 20260928.0) from `scripts/setup-host.sh`. The node mounts the host's `runsc` binaries read-only (`cluster/kind-gvisor.yaml`), so a `runsc` upgrade on the host changes the cluster's sandbox runtime.
 
+## The GPU (P5)
+
+| What | Needed for | Notes |
+| --- | --- | --- |
+| NVIDIA driver on Windows with WSL support (`/dev/dxg`, `/usr/lib/wsl`) | The local model server (`make p5`) | 566.07 (CUDA 12.7) on 2026-10-11. CUDA 13 builds need 580 or later |
+| No NVIDIA container toolkit | | Not installed: `scripts/model-server.sh` maps `/dev/dxg` and `/usr/lib/wsl` itself. If you install it, generate its CDI spec (`/etc/cdi/nvidia.yaml`) and the script uses `--gpus all` (untested here). Keep it patched (P5-09) |
+| Docker network `safe-ops-models` (172.30.99.0/28, internal) | The server's network; the kind node joins it as `eth1` | Created by `make p5`. Pick another subnet if it collides with your LAN |
+
+The server holds about 3.2 GB of the GPU's 4 GB while it runs; `make model-server-down` frees it.
+
 ## After a WSL restart or a `.wslconfig` change
 
 The kind node container may not restart on its own. It came back `Exited (128)` twice. The second time (2026-10-10), `docker inspect` showed why: Docker's restart at boot failed to create the container's systemd scope (`unable to start unit "docker-<id>.scope" ... got failed`), probably because systemd wasn't ready yet. A manual start a few minutes later worked, and the gVisor KVM platform still worked after it. Then:
@@ -30,6 +40,7 @@ Then check that each runtime still starts sandboxes, in this order:
 make verify            # gVisor: claims a sandbox and checks it
 make verify-kata       # Kata, if installed
 make attack-demos      # sandboxes survive the attacks
+make p5                # the local model server, if you use it: it doesn't restart on its own
 ```
 
 If gVisor sandboxes stay in `ContainerCreating`, run `runsc` directly on the node to see why:

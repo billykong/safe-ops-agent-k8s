@@ -5,7 +5,8 @@
 # the agent. Prints the EvalRun it wrote.
 #   scripts/eval-run.sh [RUN_ID] [SCENARIO_ID,...]
 # RUN_ID: a lowercase name, at most 30 characters (default ev-<epoch>).
-# JUDGE_MODEL overrides the judge's model (default claude-sonnet-5-5).
+# JUDGE_MODEL overrides the judge's model (default claude-sonnet-5-5), e.g.
+# qwen2.5-1.5b-instruct, the local model (P5: make p5).
 # Exits non-zero if the run didn't complete; scores don't fail it (that's
 # the merge gate's job, milestone 4).
 set -euo pipefail

@@ -3,7 +3,8 @@
 # llm-gateway.safe-ops.io; requests checked against policy and each
 # identity's token budget; sent upstream with the provider key, which only
 # this pod mounts. Upstream is the in-cluster mock provider by default;
-# scripts/llm-gateway-mode.sh live switches to the real API and key.
+# scripts/llm-gateway-mode.sh live switches to the real API and key. The
+# local model (P5) goes to the self-hosted server instead, with its own key.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -38,9 +39,9 @@ spec:
         # can still get through after the kill switch.
         - {name: REVIEW_CACHE_TTL, value: 10s}
         # What may be sent: the agent's model and the eval judge's (a
-        # different model, P4-11), bounded output, the refusal-fallback
-        # beta only.
-        - {name: MODELS, value: "claude-opus-5-5,claude-sonnet-5-5"}
+        # different model, P4-11), the local model (P5), bounded output,
+        # the refusal-fallback beta only.
+        - {name: MODELS, value: "claude-opus-5-5,claude-sonnet-5-5,qwen2.5-1.5b-instruct"}
         - {name: MAX_TOKENS_CAP, value: "16000"}
         - {name: BETAS, value: server-side-fallback-2026-07-01}
         - {name: FALLBACKS, value: default}
@@ -51,11 +52,18 @@ spec:
         - {name: UPSTREAM_URL, value: "http://mock-model.gateways.svc.cluster.local:8080"}
         - {name: UPSTREAM_TIMEOUT, value: 60s}
         - {name: API_KEY_FILE, value: /var/run/secrets/safe-ops.io/upstream/api-key}
+        # The local model (P5 M1): vLLM outside the cluster
+        # (scripts/model-server.sh up), with its own key. Without the server
+        # its requests get 503 model_unavailable; the others are unaffected.
+        - {name: ROUTES, value: "qwen2.5-1.5b-instruct=http://172.30.99.10:8000"}
+        - {name: ROUTE_PROVIDER, value: vllm}
+        - {name: ROUTE_KEY_FILE, value: /var/run/secrets/safe-ops.io/local-model/api-key}
         # Cost estimate (P4-02): USD per million input:output tokens, cache
         # writes and reads at the provider's usual 1.25x and 0.1x of input.
         # List prices: keep them current, or the dashboards' costs drift.
         # Placeholders, not checked against the current price list.
-        - {name: PRICES, value: "claude-opus-5-5=5:25,claude-sonnet-5-5=3:15"}
+        # The local model costs nothing per token (the GPU is ours).
+        - {name: PRICES, value: "claude-opus-5-5=5:25,claude-sonnet-5-5=3:15,qwen2.5-1.5b-instruct=0:0"}
         # Traces to the collector; metrics on :9090 for Prometheus (P4).
         - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://otel-collector.observability.svc.cluster.local:4318"}
         - {name: METRICS_LISTEN, value: ":9090"}
@@ -72,6 +80,7 @@ spec:
         volumeMounts:
         - {name: kube-api, mountPath: /var/run/secrets/kubernetes.io/serviceaccount, readOnly: true}
         - {name: provider-key, mountPath: /var/run/secrets/safe-ops.io/upstream, readOnly: true}
+        - {name: local-model-key, mountPath: /var/run/secrets/safe-ops.io/local-model, readOnly: true}
       # API token projected explicitly for an hour; the automounted one is
       # valid for a year on this cluster (P3 README finding 2).
       volumes:
@@ -81,6 +90,13 @@ spec:
       - name: provider-key
         secret:
           secretName: mock-provider-key
+          items: [{key: api-key, path: api-key}]
+      # The local model's key, created by scripts/model-server.sh up.
+      # Optional: the gateway runs without it, refusing that model only.
+      - name: local-model-key
+        secret:
+          secretName: local-model-key
+          optional: true
           items: [{key: api-key, path: api-key}]
       - name: kube-api
         projected:

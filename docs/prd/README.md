@@ -25,7 +25,7 @@ This folder is the product requirements document (PRD) for the whole project: wh
 | P2 Approval gate | **Phase 2 complete**: milestones 1-6 done, exit criteria met |
 | P3 Tool identity and policy | **Phase 3 complete**: milestones 1-5 done, exit criteria met |
 | P4 Observability and evals | Milestones 1-5 done (telemetry, API audit log, replay evals, CI regression gate, oversight and quality metrics with a kill-switch drill); P4-15 (seeded known-bad proposals) open |
-| P5 Local inference | Not started |
+| P5 Local inference | Milestone 1 done (vLLM outside the cluster on the host's GPU, through the LLM gateway only; the local model as an eval judge) |
 
 ## Conventions
 

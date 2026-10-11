@@ -1,0 +1,35 @@
+# The local model server (scripts/model-server.sh) runs outside the cluster
+# at 172.30.99.10:8000, on a Docker network only this cluster's node joins.
+# Pods reach it through the node, so it's Cilium's to allow (P5-07): the LLM
+# gateway may connect to it, and no pod outside namespace gateways may,
+# whatever policy its own namespace has or lacks. Namespace gateways is
+# default-deny already (P3), so there it's the gateway only.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: llm-gateway-to-local-model
+  namespace: gateways
+spec:
+  endpointSelector:
+    matchLabels: {app: llm-gateway}
+  egress:
+  - toCIDR: [172.30.99.10/32]
+    toPorts:
+    - ports: [{port: "8000", protocol: TCP}]
+---
+# A deny wins over any allow, in any namespace's own policy. It adds no
+# default deny to the pods it selects: everything else they could reach,
+# they still can.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: local-model-only-from-gateways
+spec:
+  endpointSelector:
+    matchExpressions:
+    - {key: k8s:io.kubernetes.pod.namespace, operator: NotIn, values: [gateways]}
+  enableDefaultDeny:
+    egress: false
+    ingress: false
+  egressDeny:
+  - toCIDR: [172.30.99.0/28]

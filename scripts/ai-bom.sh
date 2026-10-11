@@ -15,6 +15,8 @@ kubectl get pods -A -o json > $TMP/pods.json
 kubectl get deploy -n gateways llm-gateway -o json > $TMP/llm.json
 kubectl get deploy -n agent agent-worker -o json > $TMP/worker.json
 kubectl get configmap -n gateways mcp-registry -o jsonpath='{.data.registry\.json}' > $TMP/registry.json
+# The local model server (P5), outside the cluster, if it's running.
+docker inspect safe-ops-model > $TMP/model-server.json 2>/dev/null || echo '[]' > $TMP/model-server.json
 
 python3 - "$TMP" "$OUT" <<'EOF'
 import ast, datetime, hashlib, json, os, sys
@@ -35,6 +37,22 @@ llm = json.load(open(f"{tmp}/llm.json"))
 lenv = {e["name"]: e.get("value") for e in llm["spec"]["template"]["spec"]["containers"][0].get("env", [])}
 registry = json.load(open(f"{tmp}/registry.json"))
 
+# Self-hosted models (P5): the gateway's routes, each with its weights' lock
+# (repository, revision, every file's hash) and the server's image.
+import glob, re
+locks = {}
+for path in glob.glob("projects/05-local-inference/models/*.sha256"):
+    text = open(path).read()
+    meta = dict(re.findall(r"^# (repo|revision|served-name): (\S+)$", text, re.M))
+    files = dict((f, "sha256:" + h) for h, f in re.findall(r"^([0-9a-f]{64})  (\S+)$", text, re.M))
+    locks[meta.get("served-name")] = {"lock": path, "repo": meta.get("repo"), "revision": meta.get("revision"), "files": files}
+server = (json.load(open(f"{tmp}/model-server.json")) or [None])[0]
+self_hosted = {}
+for entry in filter(None, (lenv.get("ROUTES") or "").split(",")):
+    model, url = entry.split("=", 1)
+    self_hosted[model] = {"url": url, **locks.get(model, {}),
+                          "server": {"image": server["Config"]["Image"], "imageID": server["Image"], "args": server["Args"]} if server else "not running"}
+
 running = {}
 for p in json.load(open(f"{tmp}/pods.json"))["items"]:
     app = p["metadata"].get("labels", {}).get("app")
@@ -51,6 +69,7 @@ bom = {
                   "maxSteps": env["MAX_STEPS"], "fallbacks": "default (server-side, beta server-side-fallback-2026-07-01)"},
         "gatewayAllows": lenv.get("MODELS", "").split(","),
         "provider": lenv.get("UPSTREAM_URL"),
+        "selfHosted": self_hosted,
     },
     "prompts": {"agent system prompt": {"source": "projects/02-approval-gate/durable/agent/model.py (SYSTEM)",
                                          "sha256": sha(env["SYSTEM"].encode())}},
@@ -68,8 +87,15 @@ json.dump(bom, open(f"{out}/ai-bom.json", "w"), indent=2, sort_keys=True)
 md = [f"# AI bill of materials\n\nGenerated {bom['generated']} by `scripts/ai-bom.sh` from the code and the running cluster (P3-23).\n",
       "## Models\n", "| Use | Model | Settings |", "| --- | --- | --- |",
       f"| Agent (`AgentWorkflow`) | `{bom['models']['agent']['model']}` | effort {bom['models']['agent']['effort']}, max_tokens {bom['models']['agent']['maxTokens']}, up to {bom['models']['agent']['maxSteps']} model calls per decision, refusal fallbacks `default` |",
-      f"| LLM gateway allows | {', '.join(f'`{m}`' for m in bom['models']['gatewayAllows'])} | upstream `{bom['models']['provider']}` |",
-      "\n## Prompts\n", "| Prompt | Source | SHA-256 |", "| --- | --- | --- |"]
+      f"| LLM gateway allows | {', '.join(f'`{m}`' for m in bom['models']['gatewayAllows'])} | upstream `{bom['models']['provider']}` |"]
+for m, h in self_hosted.items():
+    srv = h["server"] if isinstance(h["server"], dict) else None
+    md.append(f"| Self-hosted (P5), via the gateway | `{m}`: `{h.get('repo')}` at `{h.get('revision')}` | `{h['url']}`; "
+              + (f"image `{srv['image']}` (`{srv['imageID']}`)" if srv else "server not running") + " |")
+for m, h in self_hosted.items():
+    md += [f"\n### `{m}` weights (lock `{h.get('lock')}`)\n", "| File | SHA-256 |", "| --- | --- |"]
+    md += [f"| `{f}` | `{d}` |" for f, d in sorted(h.get("files", {}).items())]
+md += ["\n## Prompts\n", "| Prompt | Source | SHA-256 |", "| --- | --- | --- |"]
 for n, p in bom["prompts"].items():
     md.append(f"| {n} | `{p['source']}` | `{p['sha256']}` |")
 md += ["\n## Policies\n", "| Policy | Source | SHA-256 |", "| --- | --- | --- |"]

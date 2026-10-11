@@ -57,7 +57,7 @@ flowchart LR
 | **Executor** (HTTP service inside the sandbox) | P1 | Not a boundary: same uid as user code | Nothing | Built |
 | **Warm pool** (`SandboxWarmPool`) | P1 | Infrastructure | Pre-started sandboxes | Built |
 | **Agent loop** | P1-P3 | Semi-trusted: its inputs are attacker-influenced | One workload identity per agent (`runner`, `proposer`); no write credentials; no model key | Built as a scripted Job (P1) and a Temporal worker (P2); LLM loop in P3 |
-| **LLM gateway** | P3 | Trusted | Model API key; token budgets and rate limits | Planned |
+| **LLM gateway** | P3 | Trusted | Model API key; token budgets and rate limits | Built (P3 M2); routes the local model to the self-hosted server with that server's key (P5 M1) |
 | **MCP / tool gateway** | P3 | Trusted | Tool secrets; per-agent authorisation | Planned |
 | **Policy engine** (OPA embedded in the approval controller; ValidatingAdmissionPolicy) | P1-P3 | Trusted | Rules: allow, deny, escalate | VAPs for claims, approvals and the agents' writes (P1-P2); the semantic action gate in Rego (P3) |
 | **ChangeRequest CRD + approval controller / executor** | P2 | Trusted, crown jewel | Namespace-scoped write credentials | Built (M1-M4): CRD, controller, agent proposer role, approval policies, write guard, change budget |
@@ -65,7 +65,7 @@ flowchart LR
 | **Durable workflow** (Temporal) | P2 | Trusted; no auth of its own, fenced by network policy (GAP-03) | Agent state across long approvals | Built (M5): Temporal dev server with SQLite on a volume; the agent is a worker |
 | **Observability** (OTel GenAI traces, Prometheus/Grafana, API audit log) | P4 | Trusted; agent can't write to the store | Traces, metrics, audit | Built (M1): OTel collector (the only way in, attribute allowlist), Jaeger, Prometheus (scrapes the gateways and controller), Grafana. Senders unauthenticated (GAP-06). Built (M2): API audit log over mTLS to a hash-chained sink in namespace `audit` and a node-local log; alerts on tampering, dropped events (GAP-07) and admission changes. Built (M5): only the agent's own metric names pass the collector; oversight health, reopen rate and the latest eval run exported by the controller from the records, with alerts |
 | **Eval runner** (Jobs or Argo Workflows; blind LLM judge) | P4 | Trusted, separate identity | Recorded scenarios | Built (M3): a Job as `evals/evaluator`, fresh targets in `eval-sandbox`, a judge on a different model through the LLM gateway, append-only EvalRuns. Reaches Temporal, so GAP-03 covers it. CI runs it on a fresh cluster for every pull request and fails a regression against the baseline in git (M4) |
-| **Local inference** (Ollama/llama.cpp or vLLM) | P5 | Infrastructure; no auth of its own | Model weights | Planned |
+| **Local inference** (vLLM) | P5 | Infrastructure; a bearer key only the LLM gateway holds | Model weights (hash-verified safetensors) | Built (M1): vLLM in Docker on the host's GPU, outside the cluster, on a network only the node joins; a clusterwide Cilium deny lets only the LLM gateway connect (GAP-09: the node can). The eval judge can use it |
 
 ## Trust boundaries
 
