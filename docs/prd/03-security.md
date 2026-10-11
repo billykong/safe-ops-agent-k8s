@@ -16,7 +16,7 @@ Reference documents (read 2026-09-29):
 | ASI04 Supply chain | Signed, digest-pinned images; SBOM and AI-BOM; pinned MCP servers and tool descriptors; no dynamic tool discovery | Cross-cutting |
 | ASI05 Unexpected code execution | Separate sandbox pod; gVisor (Kata on bare metal); no pickle weights; no `--trust-remote-code` | P1, P5 |
 | ASI06 Memory and context poisoning | Agent-written runbooks and memory land as reviewed PRs; sandbox and scratch memory wiped per task | P1, P2 |
-| ASI07 Insecure inter-agent communication | Mutual auth between components; only the evaluator's identity writes verdicts | P3, P4 |
+| ASI07 Insecure inter-agent communication | Mutual auth between components; only the evaluator's identity writes verdicts (done, P4 M3) | P3, P4 |
 | ASI08 Cascading failures | Change budget; circuit breaker; blast-radius caps; replay evals | P2, P4 |
 | ASI09 Human-agent trust exploitation | Deterministic approval packet; oversight metrics; seeded known-bad proposals | P2, P4 |
 | ASI10 Rogue agents | Kill switch with credential revocation; tamper-evident audit | P2, P4 |

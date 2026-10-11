@@ -24,6 +24,11 @@ spec:
   - from:
     - namespaceSelector:
         matchLabels: {kubernetes.io/metadata.name: agent}
+    # The eval runner's judge (P4-11), as the evaluator's identity.
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: evals}
+      podSelector:
+        matchLabels: {app: eval-runner}
     ports:
     - {port: 8080, protocol: TCP}
 ---

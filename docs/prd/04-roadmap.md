@@ -52,8 +52,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 ### P4: observability and evals
 1. **Done.** OTel GenAI traces, one per task from model call to `ChangeRequest`, content kept out by the collector; Prometheus/Grafana for tokens, cost and escalation rate (`make p4 test-observability`).
 2. **Done.** API audit log: the agent's identity and every change to what guards it, over mTLS to a hash-chained sink the agent can't reach or delete; tampering and admission changes alert (`make audit test-audit`).
-3. **Next.** Replay eval suite as Jobs or Argo Workflows; blind judge plus deterministic checks.
-4. Regression gate on merges (CI).
+3. **Done.** Replay eval suite as a Job, as its own identity: scenarios against fresh targets through the real pipeline, deterministic checks plus a blind judge on a different model, append-only verdicts only the evaluator can write (`make evals test-evals`).
+4. **Next.** Regression gate on merges (CI).
 5. Oversight and safety metrics; kill-switch test in the suite.
 
 ### P5: local inference

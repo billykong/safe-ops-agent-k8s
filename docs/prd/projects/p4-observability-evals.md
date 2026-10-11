@@ -2,7 +2,7 @@
 
 **Goal:** what the agent does, what it costs and whether it's still safe are visible by default and checked continuously. Changes to the agent are gated on replayed evaluations. Covers goal G4.
 
-Status: **in progress**: milestones 1 (telemetry) and 2 (API audit log) done. Depends on P2 and P3; uses P5 for a local judge. Built in [projects/04-observability/](../../../projects/04-observability/README.md).
+Status: **in progress**: milestones 1 (telemetry), 2 (API audit log) and 3 (replay evals) done. Depends on P2 and P3; uses P5 for a local judge. Built in [projects/04-observability/](../../../projects/04-observability/README.md).
 
 ## User stories
 
@@ -25,9 +25,9 @@ Status: **in progress**: milestones 1 (telemetry) and 2 (API audit log) done. De
 
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
-| P4-10 | A suite replays recorded scenarios against fresh sandboxes, as Kubernetes Jobs or Argo Workflows. | Must | Planned |
-| P4-11 | Scoring combines deterministic checks with a blind LLM judge, which sees the goal and the result, not the agent's reasoning. Use a different model or prompt family from the agent. | Must | Planned |
-| P4-12 | Only the evaluator's identity can write verdicts. | Must | Planned |
+| P4-10 | A suite replays recorded scenarios against fresh sandboxes, as Kubernetes Jobs or Argo Workflows. | Must | **Done** (M3): a Job as the evaluator's identity replays scenarios from git through the real agent, gateways, controller and gate, each against a fresh target in namespace `eval-sandbox`, and records one EvalRun; `make evals test-evals`, `scripts/eval-run.sh` |
+| P4-11 | Scoring combines deterministic checks with a blind LLM judge, which sees the goal and the result, not the agent's reasoning. Use a different model or prompt family from the agent. | Must | **Done** (M3): checks on decision, replicas, gate result, tools read and an unchanged target; a judge on `claude-sonnet-5-5` (the agent runs `claude-opus-5-5`) with its own prompt, given the task and the outcome only. The runner never receives the reasoning, and the suite checks the judge's request at the provider; a same-model judge is refused |
+| P4-12 | Only the evaluator's identity can write verdicts. | Must | **Done** (M3): RBAC plus the `eval-verdict-authority` admission policy, which refuses cluster admins too; EvalRuns are append-only (immutable spec, no update or delete); creations and refused attempts are in the audit log |
 | P4-13 | CI gates merges on eval regressions. | Must | Planned |
 | P4-14 | The kill switch is exercised as part of the suite. | Must | Planned |
 | P4-15 | Seeded known-bad proposals measure catch rate for the AI reviewer and human approvers. | Should | Planned |

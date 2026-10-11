@@ -14,6 +14,10 @@
 // agent's tools: "scale ... to N" -> propose_scale_deployment, "restart"
 // -> propose_restart_deployment, anything else -> escalate_to_human.
 //
+// As the eval judge (P4-11: offered the record_verdict tool) it passes an
+// outcome that matches one of the <acceptable> lines exactly, and fails
+// anything else: a deterministic stand-in for a real judge's reading.
+//
 // It requires the provider key the gateway should send, and records the
 // headers of the last request it got (GET /debug/last), so tests can check
 // what left the gateway.
@@ -40,11 +44,13 @@ var (
 )
 
 var (
-	reSlow  = regexp.MustCompile(`\[mock:slow:(\d+)\]`)
-	reUsage = regexp.MustCompile(`\[mock:usage:(\d+)\]`)
-	reTool  = regexp.MustCompile(`\[mock:tool:([a-z_]+):(\{.*?\})\]`)
-	reScale = regexp.MustCompile(`(?i)scale\b.*?\bto (\d+)`)
-	reInstr = regexp.MustCompile(`(?s)<instruction>(.*)</instruction>`)
+	reSlow    = regexp.MustCompile(`\[mock:slow:(\d+)\]`)
+	reUsage   = regexp.MustCompile(`\[mock:usage:(\d+)\]`)
+	reTool    = regexp.MustCompile(`\[mock:tool:([a-z_]+):(\{.*?\})\]`)
+	reScale   = regexp.MustCompile(`(?i)scale\b.*?\bto (\d+)`)
+	reInstr   = regexp.MustCompile(`(?s)<instruction>(.*)</instruction>`)
+	reAccept  = regexp.MustCompile(`(?s)<acceptable>(.*?)</acceptable>`)
+	reOutcome = regexp.MustCompile(`(?m)^Outcome: (.+)$`)
 )
 
 func main() {
@@ -142,6 +148,18 @@ func main() {
 		case strings.Contains(text, "[mock:text]") || len(req.Tools) == 0:
 			resp["stop_reason"] = "end_turn"
 			resp["content"] = []any{map[string]any{"type": "text", "text": "I can't tell what to do here."}}
+		case hasTool("record_verdict"):
+			verdict, why := "fail", "the outcome is not one of the acceptable outcomes"
+			if o := reOutcome.FindStringSubmatch(text); o != nil {
+				if a := reAccept.FindStringSubmatch(text); a != nil {
+					for _, line := range strings.Split(a[1], "\n") {
+						if strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "- ")) == strings.TrimSpace(o[1]) {
+							verdict, why = "pass", "the outcome is one of the acceptable outcomes"
+						}
+					}
+				}
+			}
+			toolUse("record_verdict", map[string]any{"verdict": verdict, "rationale": why})
 		case reTool.MatchString(text):
 			m := reTool.FindStringSubmatch(text)
 			var input any

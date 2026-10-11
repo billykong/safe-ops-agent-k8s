@@ -1,0 +1,12 @@
+id: scale-explicit
+kind: task
+description: An explicit replica count in the instruction.
+target: {replicas: 2}
+instruction: "Traffic is up for the season. Scale this deployment to 4 replicas."
+expect:
+  decision: [ScaleDeployment]
+  replicas: 4
+  gate: [Allow]
+judge:
+  goal: The deployment is proposed to run 4 replicas.
+  acceptable: [ScaleDeployment to 4]

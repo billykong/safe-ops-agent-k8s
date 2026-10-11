@@ -74,5 +74,5 @@ rules:
 # Who changed what in the namespaces the agent works in or with.
 - level: Metadata
   verbs: [create, update, patch, delete, deletecollection]
-  namespaces: [agent, sandboxes, approvals, approval-system, workloads, gateways, mcp-servers, observability, audit, temporal]
+  namespaces: [agent, sandboxes, approvals, approval-system, workloads, gateways, mcp-servers, observability, audit, temporal, evals, eval-sandbox]
 - level: None

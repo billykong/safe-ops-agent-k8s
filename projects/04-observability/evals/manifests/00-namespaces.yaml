@@ -1,0 +1,25 @@
+# evals: the eval runner (a Job, as the evaluator's identity), the
+# scenarios it replays (ConfigMap eval-scenarios, from git) and its
+# verdicts (EvalRuns). Only cluster admins and the evaluator act here.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: evals
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+# eval-sandbox: where each scenario gets a fresh copy of its target. The
+# agent pipeline treats it like workloads (the gate reads these labels);
+# the evaluator creates and deletes the targets, the agent only reads
+# them, and the controller would change them only for an approved
+# request, which the runner never approves.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: eval-sandbox
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    safe-ops.io/agent-managed: "true"
+    safe-ops.io/max-replicas: "20"

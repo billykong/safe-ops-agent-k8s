@@ -33,13 +33,14 @@ spec:
         imagePullPolicy: Never
         env:
         - {name: AUDIENCE, value: llm-gateway.safe-ops.io}
-        - {name: ALLOWED_IDENTITIES, value: "system:serviceaccount:agent:runner,system:serviceaccount:agent:proposer"}
+        - {name: ALLOWED_IDENTITIES, value: "system:serviceaccount:agent:runner,system:serviceaccount:agent:proposer,system:serviceaccount:evals:evaluator"}
         # How long a token review is reused: the most a revoked identity
         # can still get through after the kill switch.
         - {name: REVIEW_CACHE_TTL, value: 10s}
-        # What may be sent: one model, bounded output, the refusal-fallback
+        # What may be sent: the agent's model and the eval judge's (a
+        # different model, P4-11), bounded output, the refusal-fallback
         # beta only.
-        - {name: MODELS, value: claude-opus-5-5}
+        - {name: MODELS, value: "claude-opus-5-5,claude-sonnet-5-5"}
         - {name: MAX_TOKENS_CAP, value: "16000"}
         - {name: BETAS, value: server-side-fallback-2026-07-01}
         - {name: FALLBACKS, value: default}
@@ -53,7 +54,8 @@ spec:
         # Cost estimate (P4-02): USD per million input:output tokens, cache
         # writes and reads at the provider's usual 1.25x and 0.1x of input.
         # List prices: keep them current, or the dashboards' costs drift.
-        - {name: PRICES, value: "claude-opus-5-5=5:25"}
+        # Placeholders, not checked against the current price list.
+        - {name: PRICES, value: "claude-opus-5-5=5:25,claude-sonnet-5-5=3:15"}
         # Traces to the collector; metrics on :9090 for Prometheus (P4).
         - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://otel-collector.observability.svc.cluster.local:4318"}
         - {name: METRICS_LISTEN, value: ":9090"}
