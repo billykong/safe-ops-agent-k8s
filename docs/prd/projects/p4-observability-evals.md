@@ -2,7 +2,7 @@
 
 **Goal:** what the agent does, what it costs and whether it's still safe are visible by default and checked continuously. Changes to the agent are gated on replayed evaluations. Covers goal G4.
 
-Status: **in progress**: milestones 1 (telemetry), 2 (API audit log) and 3 (replay evals) done. Depends on P2 and P3; uses P5 for a local judge. Built in [projects/04-observability/](../../../projects/04-observability/README.md).
+Status: **in progress**: milestones 1 (telemetry), 2 (API audit log), 3 (replay evals) and 4 (CI regression gate) done. Depends on P2 and P3; uses P5 for a local judge. Built in [projects/04-observability/](../../../projects/04-observability/README.md).
 
 ## User stories
 
@@ -28,7 +28,7 @@ Status: **in progress**: milestones 1 (telemetry), 2 (API audit log) and 3 (repl
 | P4-10 | A suite replays recorded scenarios against fresh sandboxes, as Kubernetes Jobs or Argo Workflows. | Must | **Done** (M3): a Job as the evaluator's identity replays scenarios from git through the real agent, gateways, controller and gate, each against a fresh target in namespace `eval-sandbox`, and records one EvalRun; `make evals test-evals`, `scripts/eval-run.sh` |
 | P4-11 | Scoring combines deterministic checks with a blind LLM judge, which sees the goal and the result, not the agent's reasoning. Use a different model or prompt family from the agent. | Must | **Done** (M3): checks on decision, replicas, gate result, tools read and an unchanged target; a judge on `claude-sonnet-5-5` (the agent runs `claude-opus-5-5`) with its own prompt, given the task and the outcome only. The runner never receives the reasoning, and the suite checks the judge's request at the provider; a same-model judge is refused |
 | P4-12 | Only the evaluator's identity can write verdicts. | Must | **Done** (M3): RBAC plus the `eval-verdict-authority` admission policy, which refuses cluster admins too; EvalRuns are append-only (immutable spec, no update or delete); creations and refused attempts are in the audit log |
-| P4-13 | CI gates merges on eval regressions. | Must | Planned |
+| P4-13 | CI gates merges on eval regressions. | Must | **Done** (M4): on every pull request to main, CI builds the stack on a fresh kind cluster, replays the scenarios with the mock model, and fails if a scenario the baseline in git passes now fails, if safety didn't hold, or if a scenario, the agent's prompt or model, or the judge changed without a new baseline; required check `result`; `make eval-gate test-eval-gate`. The mock doesn't score prompt or model changes, only forces a re-baseline ([GAP-08](../../known-gaps.md#gap-08-the-ci-gate-cant-score-a-prompt-or-model-change)) |
 | P4-14 | The kill switch is exercised as part of the suite. | Must | Planned |
 | P4-15 | Seeded known-bad proposals measure catch rate for the AI reviewer and human approvers. | Should | Planned |
 
@@ -44,4 +44,4 @@ Status: **in progress**: milestones 1 (telemetry), 2 (API audit log) and 3 (repl
 
 A deliberately regressed agent change fails CI on the eval gate. Dashboards show cost per task and escalation rate for a test run. A trace for one task links model calls, tool calls and the resulting `ChangeRequest`, with prompt content redacted.
 
-Status: dashboards show cost per task and escalation rate for a test run, and a task's trace links model calls, tool calls and the resulting `ChangeRequest` with no prompt content (milestone 1, `make test-observability`). The CI eval gate is milestone 4.
+Status: dashboards show cost per task and escalation rate for a test run, and a task's trace links model calls, tool calls and the resulting `ChangeRequest` with no prompt content (milestone 1, `make test-observability`). A deliberately regressed agent change (`evals/regressions/clamp-replicas.patch`) fails the eval gate (milestone 4, `make test-eval-gate`; in CI, the workflow's `regression` input).

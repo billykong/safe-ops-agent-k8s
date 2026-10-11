@@ -1,0 +1,8 @@
+# What the eval gate (P4-13) measures and enforces: the scenarios, the
+# baseline, the gate and the workflow that runs it. With "Require review
+# from Code Owners" on main, a change here needs the owner's review, so a
+# contributor can't weaken the gate in the same change it would catch.
+/projects/04-observability/evals/ @billykong
+/scripts/eval-*.sh @billykong
+/scripts/eval_summary.py @billykong
+/.github/ @billykong
