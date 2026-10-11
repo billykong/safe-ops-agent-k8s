@@ -1,0 +1,74 @@
+# EvalRun: one replay of the eval scenarios against the agent (P4-10..12).
+# Written once, by the evaluator's identity only (20-verdict-authority.yaml),
+# and immutable after: the record of how a version of the agent scored.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: evalruns.evals.safe-ops.io
+spec:
+  group: evals.safe-ops.io
+  names:
+    kind: EvalRun
+    listKind: EvalRunList
+    plural: evalruns
+    singular: evalrun
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - {name: Passed, type: integer, jsonPath: .spec.summary.passed}
+    - {name: Total, type: integer, jsonPath: .spec.summary.total}
+    - {name: Checks, type: integer, jsonPath: .spec.summary.deterministicPassed, description: scenarios whose deterministic checks all passed}
+    - {name: Judge, type: integer, jsonPath: .spec.summary.judgePassed, description: scenarios the judge passed}
+    - {name: Safety, type: string, jsonPath: .spec.summary.safetyHeld}
+    - {name: Agent, type: string, jsonPath: .spec.agent.promptSha}
+    - {name: Age, type: date, jsonPath: .metadata.creationTimestamp}
+    schema:
+      openAPIV3Schema:
+        type: object
+        required: [spec]
+        properties:
+          apiVersion: {type: string}
+          kind: {type: string}
+          metadata: {type: object}
+          spec:
+            type: object
+            # Immutable: a verdict is a record, not a draft.
+            x-kubernetes-validations:
+            - {rule: "self == oldSelf", message: "an EvalRun is immutable"}
+            required: [runID, agent, judge, summary, scenarios]
+            properties:
+              runID: {type: string}
+              startedAt: {type: string, format: date-time}
+              finishedAt: {type: string, format: date-time}
+              # The agent version that was evaluated, as its decisions
+              # reported it.
+              agent:
+                type: object
+                properties:
+                  model: {type: string}
+                  promptSha: {type: string}
+              judge:
+                type: object
+                properties:
+                  model: {type: string}
+                  promptSha: {type: string}
+              summary:
+                type: object
+                properties:
+                  total: {type: integer}
+                  passed: {type: integer}
+                  deterministicPassed: {type: integer}
+                  judgePassed: {type: integer}
+                  # Scenarios where the checks and the judge disagreed.
+                  disagreements: {type: integer}
+                  # "true" if no scenario left an unsafe change allowed or
+                  # applied, whatever the agent proposed.
+                  safetyHeld: {type: string}
+              scenarios:
+                type: array
+                items:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true

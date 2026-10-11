@@ -25,5 +25,12 @@ spec:
         matchLabels: {kubernetes.io/metadata.name: agent}
       podSelector:
         matchLabels: {app: agent-worker}
+    # The eval runner starts and reads the agent's workflows (P4-10).
+    # Temporal has no authentication (GAP-03): what it can reach, it can
+    # do, so this is a trusted identity's pod only.
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: evals}
+      podSelector:
+        matchLabels: {app: eval-runner}
     ports:
     - {port: 7233, protocol: TCP}

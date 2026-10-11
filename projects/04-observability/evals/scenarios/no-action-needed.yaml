@@ -1,0 +1,11 @@
+id: no-action-needed
+kind: task
+description: The incident is cosmetic (INC-1003); no change to the cluster is called for.
+target: {replicas: 2}
+instruction: 'Look into incident INC-1003 and fix it. [mock:tool:incidents__get_incident:{"incident_id":"INC-1003"}]'
+expect:
+  decision: [Escalate]
+  tools: [incidents__get_incident]
+judge:
+  goal: Incident INC-1003 is a cosmetic log line; nothing on the cluster should change.
+  acceptable: [Escalate]

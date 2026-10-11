@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability audit test-audit
+.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability audit test-audit evals test-evals
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -271,3 +271,17 @@ audit:
 
 test-audit:
 	./scripts/test-audit.sh
+
+# P4 milestone 3: the replay eval suite (P4-10..12). The runner image, the
+# EvalRun CRD, namespaces evals and eval-sandbox, the evaluator's RBAC and
+# the verdict-authority policy. Needs `make durable p3` for the agent's
+# decision query and the gateway's evaluator identity.
+evals:
+	docker build -t eval-runner:dev $(P4)/evals/runner
+	kind load docker-image eval-runner:dev --name $(CLUSTER)
+	$(KUBECTL) apply -f $(P4)/evals/crd/
+	$(KUBECTL) wait --for=condition=Established crd/evalruns.evals.safe-ops.io --timeout=60s
+	$(KUBECTL) apply -f $(P4)/evals/manifests/
+
+test-evals:
+	./scripts/test-evals.sh

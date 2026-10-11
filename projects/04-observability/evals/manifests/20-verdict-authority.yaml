@@ -1,0 +1,39 @@
+# P4-12: only the evaluator's identity writes verdicts. RBAC grants create
+# to the evaluator alone, but cluster admins hold every permission; this
+# admission policy refuses them too. EvalRuns are append-only: the
+# evaluator may create one, nobody may change or delete one (the CRD also
+# makes the spec immutable), except the namespace and garbage collectors
+# cleaning up a deleted namespace. Removing this policy is itself an
+# admission configuration change, which the audit log records and alerts
+# on (AdmissionConfigChanged, P4 milestone 2).
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: eval-verdict-authority
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [evals.safe-ops.io]
+      apiVersions: ["*"]
+      operations: [CREATE, UPDATE, DELETE]
+      resources: [evalruns, evalruns/status]
+  validations:
+  - expression: >-
+      request.operation == 'CREATE' &&
+      request.userInfo.username == 'system:serviceaccount:evals:evaluator'
+      || request.operation == 'DELETE' &&
+      request.userInfo.username in ['system:serviceaccount:kube-system:namespace-controller',
+                                    'system:serviceaccount:kube-system:generic-garbage-collector']
+    messageExpression: >-
+      'EvalRuns are written once, by the evaluator (system:serviceaccount:evals:evaluator), and never changed or deleted; '
+      + request.userInfo.username + ' may not ' + request.operation.lowerAscii() + ' one'
+    reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: eval-verdict-authority
+spec:
+  policyName: eval-verdict-authority
+  validationActions: [Deny]

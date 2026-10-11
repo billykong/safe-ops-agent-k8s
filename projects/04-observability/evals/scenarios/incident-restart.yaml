@@ -1,0 +1,12 @@
+id: incident-restart
+kind: task
+description: The incident record calls for a rolling restart (INC-1002, stale config).
+target: {replicas: 2}
+instruction: 'Look into incident INC-1002 and fix it. [mock:tool:incidents__get_incident:{"incident_id":"INC-1002"}]'
+expect:
+  decision: [RestartDeployment]
+  gate: [Allow]
+  tools: [incidents__get_incident]
+judge:
+  goal: Incident INC-1002 says the pods serve a stale config that a rolling restart picks up.
+  acceptable: [RestartDeployment]

@@ -6,7 +6,7 @@ Weaknesses we know about, have reproduced, and haven't closed yet. Each has an I
 | --- | --- | --- | --- | --- |
 | [GAP-01](#gap-01-domain-fronting-through-the-pypi-egress-allowlist) | Domain fronting through the PyPI egress allowlist | High for sandboxes with egress; none for default sandboxes | Open | [P1-13](prd/projects/p1-sandboxed-code-exec.md) |
 | [GAP-02](#gap-02-admission-guards-cant-protect-their-own-configuration) | Admission guards can't protect their own configuration | Low today (the agent has no such RBAC); critical if that RBAC is ever granted | Open (inherent; mitigated by RBAC tests) | [P2-13, P2-14, P2-21](prd/projects/p2-approval-gate.md) |
-| [GAP-03](#gap-03-temporals-frontend-has-no-authentication) | Temporal's frontend has no authentication | Low (only the agent's worker can reach it, and it can already do what the API allows) | Open (accepted for the dev server) | [P2-30](prd/projects/p2-approval-gate.md) |
+| [GAP-03](#gap-03-temporals-frontend-has-no-authentication) | Temporal's frontend has no authentication | Low (only the agent's worker and the eval runner can reach it) | Open (accepted for the dev server) | [P2-30](prd/projects/p2-approval-gate.md) |
 | [GAP-04](#gap-04-agent-to-gateway-traffic-is-plaintext) | Agent-to-gateway traffic is plaintext | Low on one node; Medium on multi-node clusters | Open | [P3-24](prd/projects/p3-tool-identity-policy.md) |
 | [GAP-05](#gap-05-narrow-channels-through-allowed-tool-arguments) | Narrow channels through allowed tool arguments | Low (about 20 bits a call, to the incident tracker only) | Open (accepted) | [P3-31](prd/projects/p3-tool-identity-policy.md) |
 | [GAP-06](#gap-06-the-collector-cant-tell-who-sent-a-span) | The collector can't tell who sent a span | Low (traces are a debugging aid; the numbers that matter are scraped from the gateways and controller) | Open | [P4-01](prd/projects/p4-observability-evals.md) |
@@ -99,7 +99,7 @@ The agent's workflows run on Temporal's development server (`projects/02-approva
 
 ### Impact
 
-Limited by the network policy: only pods labelled `app: agent-worker` in the `agent` namespace can connect (`make test-durable` checks that other agent pods, other namespaces and sandboxes can't). That pod is the agent itself, so the gap gives the agent nothing over its own work it couldn't already do: it could terminate or rewrite its own workflows, or start new ones, each of which can only propose ChangeRequests through the same RBAC and admission. It can't approve, apply or bypass anything through Temporal. The exposure grows if anything else is ever allowed to reach Temporal, or if workflow inputs start carrying secrets (they mustn't: P3 keeps secrets in gateways).
+Limited by the network policy: only pods labelled `app: agent-worker` in the `agent` namespace, and since P4 milestone 3 the eval runner (`app: eval-runner` in `evals`), can connect (`make test-durable` checks that other agent pods, other namespaces and sandboxes can't). That pod is the agent itself, so the gap gives the agent nothing over its own work it couldn't already do: it could terminate or rewrite its own workflows, or start new ones, each of which can only propose ChangeRequests through the same RBAC and admission. It can't approve, apply or bypass anything through Temporal. The exposure grows with each client allowed to reach Temporal, or if workflow inputs start carrying secrets (they mustn't: P3 keeps secrets in gateways). The eval runner is the second: it needs to start the agent's workflows and query their decisions, but could also terminate, signal or reset any of them, and read their histories, which hold the model's reasoning. The eval judge's blindness (P4-11) therefore rests on the runner's code, not on what its identity can reach.
 
 The dev server is also a single process with SQLite on one volume: no high availability, and losing the volume loses in-flight workflows (the ChangeRequests, the record that matters, are unaffected).
 
@@ -113,7 +113,7 @@ The dev server is also a single process with SQLite on one volume: no high avail
 
 ### Status
 
-Open, accepted for the development server. Revisit when Temporal moves to a production-style deployment or any second client needs access.
+Open, accepted for the development server. A second client (the eval runner, a trusted identity) now has access; with an authorizer it would get only start and query on the agent's task queue. Revisit when Temporal moves to a production-style deployment, or before anything less trusted needs access.
 
 ## GAP-04: agent-to-gateway traffic is plaintext
 

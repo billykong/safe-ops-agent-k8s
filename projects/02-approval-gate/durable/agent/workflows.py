@@ -9,8 +9,8 @@ from temporalio.common import RetryPolicy
 with workflow.unsafe.imports_passed_through():
     from dataclasses import replace
 
-    from shared import (FINAL_PHASES, AgentOutcome, ChangeTask, Decision, DecideRequest, Goal, ModelDecision,
-                        Observation, Outcome, PollRequest, Progress)
+    from shared import (FINAL_PHASES, AgentOutcome, ChangeTask, Decision, DecideRequest, DecisionSummary, Goal,
+                        ModelDecision, Observation, Outcome, PollRequest, Progress)
 
 
 @workflow.defn
@@ -73,10 +73,16 @@ class AgentWorkflow:
 
     def __init__(self) -> None:
         self._state = "starting"
+        self._decision: DecisionSummary | None = None
 
     @workflow.query
     def state(self) -> str:
         return self._state
+
+    @workflow.query
+    def decision(self) -> DecisionSummary | None:
+        """The validated decision, once made, without the model's reasoning."""
+        return self._decision
 
     @workflow.run
     async def run(self, goal: Goal) -> AgentOutcome:
@@ -91,6 +97,8 @@ class AgentWorkflow:
         d: ModelDecision = await workflow.execute_activity(
             "decide", DecideRequest(goal, obs), result_type=ModelDecision,
             start_to_close_timeout=timedelta(seconds=150), retry_policy=RetryPolicy(maximum_attempts=2))
+        self._decision = DecisionSummary(action=d.action, replicas=d.replicas, escalation=d.escalation, model=d.model,
+                                         prompt_sha=d.prompt_sha, tools_used=list(d.tools_used))
         if d.action == "Escalate":
             self._state = "escalated"
             return AgentOutcome(goal=goal.name, action=d.action, reason=d.reason, detail=d.detail, tools_used=d.tools_used)

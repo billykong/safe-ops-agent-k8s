@@ -64,7 +64,7 @@ flowchart LR
 | **Kill switch** | P2 | Trusted | Flag checked by a fail-closed admission policy, plus credential revocation, workflow termination, scale to zero | Built (M4-M5) |
 | **Durable workflow** (Temporal) | P2 | Trusted; no auth of its own, fenced by network policy (GAP-03) | Agent state across long approvals | Built (M5): Temporal dev server with SQLite on a volume; the agent is a worker |
 | **Observability** (OTel GenAI traces, Prometheus/Grafana, API audit log) | P4 | Trusted; agent can't write to the store | Traces, metrics, audit | Built (M1): OTel collector (the only way in, attribute allowlist), Jaeger, Prometheus (scrapes the gateways and controller), Grafana. Senders unauthenticated (GAP-06). Built (M2): API audit log over mTLS to a hash-chained sink in namespace `audit` and a node-local log; alerts on tampering, dropped events (GAP-07) and admission changes |
-| **Eval runner** (Jobs or Argo Workflows; blind LLM judge) | P4 | Trusted, separate identity | Recorded scenarios | Planned |
+| **Eval runner** (Jobs or Argo Workflows; blind LLM judge) | P4 | Trusted, separate identity | Recorded scenarios | Built (M3): a Job as `evals/evaluator`, fresh targets in `eval-sandbox`, a judge on a different model through the LLM gateway, append-only EvalRuns. Reaches Temporal, so GAP-03 covers it |
 | **Local inference** (Ollama/llama.cpp or vLLM) | P5 | Infrastructure; no auth of its own | Model weights | Planned |
 
 ## Trust boundaries

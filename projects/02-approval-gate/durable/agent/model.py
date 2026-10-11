@@ -69,7 +69,7 @@ def escalate(detail, kind, reason="the agent could not decide safely; a human mu
     quote model output or tool errors, so it stays in the log and the
     workflow result, out of telemetry."""
     log("escalated", detail=detail, kind=kind, **kw)
-    return ModelDecision(action="Escalate", reason=reason, detail=detail, model=MODEL, escalation=kind, **kw)
+    return ModelDecision(action="Escalate", reason=reason, detail=detail, model=MODEL, escalation=kind, prompt_sha=PROMPT_SHA, **kw)
 
 
 @activity.defn
@@ -212,7 +212,7 @@ async def _decide(goal: Goal, obs: Observation) -> ModelDecision:
                     return escalate(f"invalid model output: {e}", "invalid_output", request_id=rid, tools_used=used)
                 log("decided", tool=call.name, input=json.dumps(call.input), model=resp.model, request_id=rid, prompt_sha=PROMPT_SHA,
                     step=step, tools_used=used, input_tokens=resp.usage.input_tokens, output_tokens=resp.usage.output_tokens)
-                kw = dict(model=resp.model, request_id=rid, tools_used=used)
+                kw = dict(model=resp.model, request_id=rid, tools_used=used, prompt_sha=PROMPT_SHA)
                 if call.name == "escalate_to_human":
                     return ModelDecision(action="Escalate", reason=reason, detail="the model chose to escalate", escalation="model_chose", **kw)
                 if call.name == "propose_restart_deployment":

@@ -1,0 +1,48 @@
+# evals: default deny. The runner reaches the API server, Temporal's
+# frontend (to start and read the agent's workflows) and the LLM gateway
+# (the judge). Temporal and the gateway admit it on their side (P2's
+# durable/manifests/20-networkpolicy.yaml, P3's 30-networkpolicy.yaml).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: evals
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: eval-runner-egress
+  namespace: evals
+spec:
+  endpointSelector:
+    matchLabels: {app: eval-runner}
+  egress:
+  - toEntities: [kube-apiserver]
+    toPorts: [{ports: [{port: "6443", protocol: TCP}]}]
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: kube-system, k8s:k8s-app: kube-dns}
+    toPorts:
+    - ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}]
+      rules:
+        dns:
+        - matchName: temporal.temporal.svc.cluster.local
+        - matchName: llm-gateway.gateways.svc.cluster.local
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: temporal, app: temporal}
+    toPorts: [{ports: [{port: "7233", protocol: TCP}]}]
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: gateways, app: llm-gateway}
+    toPorts: [{ports: [{port: "8080", protocol: TCP}]}]
+---
+# The scenario targets are pause containers: no traffic either way.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: eval-sandbox
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]

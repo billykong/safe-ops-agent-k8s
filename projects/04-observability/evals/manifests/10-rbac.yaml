@@ -1,0 +1,115 @@
+# The evaluator: a separate identity from the agent (P4-12). It may
+# create EvalRuns (and nothing else may: 20-verdict-authority.yaml),
+# create and delete scenario targets in eval-sandbox, and read the
+# ChangeRequests the agent proposes. Its LLM gateway access is in P3's
+# gateway manifest (ALLOWED_IDENTITIES); Temporal and the gateway admit
+# its pods by network policy.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: evaluator
+  namespace: evals
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: evaluator
+  namespace: evals
+rules:
+- apiGroups: [evals.safe-ops.io]
+  resources: [evalruns]
+  verbs: [create, get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: evaluator
+  namespace: evals
+subjects:
+- {kind: ServiceAccount, name: evaluator, namespace: evals}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: evaluator}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: evaluator-targets
+  namespace: eval-sandbox
+rules:
+- apiGroups: [apps]
+  resources: [deployments]
+  verbs: [create, get, list, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: evaluator-targets
+  namespace: eval-sandbox
+subjects:
+- {kind: ServiceAccount, name: evaluator, namespace: evals}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: evaluator-targets}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: evaluator-read-proposals
+  namespace: approvals
+rules:
+- apiGroups: [approval.safe-ops.io]
+  resources: [changerequests]
+  verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: evaluator-read-proposals
+  namespace: approvals
+subjects:
+- {kind: ServiceAccount, name: evaluator, namespace: evals}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: evaluator-read-proposals}
+---
+# The agent observes its target, as in workloads (P3's
+# 40-proposer-observe-rbac.yaml).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deployment-reader
+  namespace: eval-sandbox
+rules:
+- apiGroups: [apps]
+  resources: [deployments]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: proposer-deployment-reader
+  namespace: eval-sandbox
+subjects:
+- {kind: ServiceAccount, name: proposer, namespace: agent}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: deployment-reader}
+---
+# The controller reviews proposals here as in workloads: the same rules as
+# its generated Role there (P2 config/rbac/role.yaml), so the review
+# packet's dry run, blast radius and the gate work unchanged.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: approval-controller
+  namespace: eval-sandbox
+rules:
+- apiGroups: [apps]
+  resources: [deployments]
+  verbs: [get, patch]
+- apiGroups: [policy]
+  resources: [poddisruptionbudgets]
+  verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: approval-controller
+  namespace: eval-sandbox
+subjects:
+- {kind: ServiceAccount, name: approval-controller, namespace: approval-system}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: approval-controller}

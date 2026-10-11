@@ -109,6 +109,22 @@ class ModelDecision:
     # Why it escalated, in one word (model_chose, invalid_output,
     # step_limit, ...); "" when it proposed a change.
     escalation: str = ""
+    # The system prompt's hash: which prompt version decided (P4 evals).
+    prompt_sha: str = ""
+
+
+@dataclass
+class DecisionSummary:
+    """What the agent decided, without its reasoning: the AgentWorkflow's
+    `decision` query, read by the eval runner (P4-11). Leaving the reason
+    and detail out here keeps the judge blind by construction: the runner
+    never receives them."""
+    action: str
+    replicas: Optional[int] = None
+    escalation: str = ""
+    model: str = ""
+    prompt_sha: str = ""
+    tools_used: list = field(default_factory=list)
 
 
 @dataclass
