@@ -1,12 +1,13 @@
-// Package oversight computes oversight metrics (P2-42) from the
-// ChangeRequests themselves: who decided what, how fast, and whether they
-// approved requests the review rules flagged. Derived from the record on
-// every call, not counted in memory, so a controller restart or a replayed
-// reconcile can't skew them.
+// Package oversight computes oversight metrics (P2-42, P4-20, P4-21) from
+// the ChangeRequests themselves: who decided what, how fast, whether they
+// approved requests the review rules flagged, and whether applied changes
+// stuck. Derived from the record on every call, not counted in memory, so
+// a controller restart or a replayed reconcile can't skew them.
 package oversight
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sort"
 	"time"
@@ -46,10 +47,18 @@ type Report struct {
 	ByHuman, ByBudget, ByController, Expired, Cancelled int
 	// Reproposed: requests whose plan was recomputed after drift.
 	Reproposed int
-	Approvers  []Approver
+	// Applied changes, and those reopened: another proposal for the same
+	// target within ReopenWindow of the apply (P4-20). A proxy for "the
+	// change didn't settle it": a rollback, a correction, or a second try.
+	Applied, Reopened int
+	Approvers         []Approver
 	// HumanSeconds and BudgetSeconds: proposal-to-decision times.
 	HumanSeconds, BudgetSeconds []float64
 }
+
+// ReopenWindow: how soon after an apply another proposal for the same
+// target counts as reopening it.
+const ReopenWindow = time.Hour
 
 var final = map[v1.Phase]bool{v1.PhaseApplied: true, v1.PhaseRejected: true, v1.PhaseFailed: true,
 	v1.PhaseExpired: true, v1.PhaseCancelled: true}
@@ -58,12 +67,26 @@ var final = map[v1.Phase]bool{v1.PhaseApplied: true, v1.PhaseRejected: true, v1.
 func Compute(items []v1.ChangeRequest) Report {
 	r := Report{ByPhase: map[v1.Phase]int{}}
 	byName := map[string]*Approver{}
+	proposed := map[v1.TargetRef][]time.Time{}
+	for i := range items {
+		t := items[i].CreationTimestamp.Time
+		if p := items[i].Status.ProposedAt; p != nil {
+			t = p.Time
+		}
+		proposed[items[i].Spec.Action.Target] = append(proposed[items[i].Spec.Action.Target], t)
+	}
 	for i := range items {
 		st := items[i].Status
 		r.Total++
 		r.ByPhase[st.Phase]++
 		if st.Proposals > 1 {
 			r.Reproposed++
+		}
+		if st.Phase == v1.PhaseApplied {
+			r.Applied++
+			if st.AppliedAt != nil && reopened(st.AppliedAt.Time, proposed[items[i].Spec.Action.Target]) {
+				r.Reopened++
+			}
 		}
 		if !final[st.Phase] {
 			continue
@@ -116,6 +139,17 @@ func Compute(items []v1.ChangeRequest) Report {
 	return r
 }
 
+// reopened: a proposal for the same target came after the apply, within
+// ReopenWindow. The applied request's own proposal came before its apply.
+func reopened(applied time.Time, proposals []time.Time) bool {
+	for _, p := range proposals {
+		if p.After(applied) && p.Sub(applied) <= ReopenWindow {
+			return true
+		}
+	}
+	return false
+}
+
 func worst(rv *v1.Review) v1.Severity {
 	if rv == nil {
 		return ""
@@ -154,6 +188,7 @@ type Collector struct {
 	List func(context.Context) ([]v1.ChangeRequest, error)
 
 	requests, decisions, flagged, reproposed, outcomes *prometheus.Desc
+	applied, reopened, approverSeconds                 *prometheus.Desc
 	timeToDecision                                     *prometheus.Desc
 }
 
@@ -171,13 +206,21 @@ func NewCollector(list func(context.Context) ([]v1.ChangeRequest, error)) *Colle
 			[]string{"approver", "severity"}, nil),
 		reproposed: prometheus.NewDesc("safeops_changerequests_reproposed",
 			"ChangeRequests re-proposed after their target drifted.", nil, nil),
+		applied: prometheus.NewDesc("safeops_changerequests_applied",
+			"ChangeRequests applied.", nil, nil),
+		reopened: prometheus.NewDesc("safeops_changerequests_reopened",
+			"Applied ChangeRequests followed within an hour by another proposal for the same target.", nil, nil),
+		approverSeconds: prometheus.NewDesc("safeops_approver_decision_seconds",
+			"Seconds from proposal to an approver's decision, by quantile over their decisions.",
+			[]string{"approver", "quantile"}, nil),
 		timeToDecision: prometheus.NewDesc("safeops_changerequest_time_to_decision_seconds",
 			"Seconds from proposal to decision.", []string{"decided_by"}, nil),
 	}
 }
 
 func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
-	for _, d := range []*prometheus.Desc{c.requests, c.outcomes, c.decisions, c.flagged, c.reproposed, c.timeToDecision} {
+	for _, d := range []*prometheus.Desc{c.requests, c.outcomes, c.decisions, c.flagged, c.reproposed,
+		c.applied, c.reopened, c.approverSeconds, c.timeToDecision} {
 		ch <- d
 	}
 }
@@ -203,11 +246,18 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	g(c.outcomes, r.Expired, "expiry")
 	g(c.outcomes, r.Cancelled, "kill-switch")
 	g(c.reproposed, r.Reproposed)
+	g(c.applied, r.Applied)
+	g(c.reopened, r.Reopened)
 	for _, a := range r.Approvers {
 		g(c.decisions, a.Approved, a.Name, "approved")
 		g(c.decisions, a.Rejected, a.Name, "rejected")
 		g(c.flagged, a.ApprovedFlagged, a.Name, "warning")
 		g(c.flagged, a.ApprovedCritical, a.Name, "critical")
+		for _, q := range []float64{0.5, 0.9} {
+			if v := Quantile(a.Seconds, q); !math.IsNaN(v) {
+				ch <- prometheus.MustNewConstMetric(c.approverSeconds, prometheus.GaugeValue, v, a.Name, fmt.Sprint(q))
+			}
+		}
 	}
 	hist := func(xs []float64, by string) {
 		counts := map[float64]uint64{}

@@ -54,10 +54,10 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 2. **Done.** API audit log: the agent's identity and every change to what guards it, over mTLS to a hash-chained sink the agent can't reach or delete; tampering and admission changes alert (`make audit test-audit`).
 3. **Done.** Replay eval suite as a Job, as its own identity: scenarios against fresh targets through the real pipeline, deterministic checks plus a blind judge on a different model, append-only verdicts only the evaluator can write (`make evals test-evals`).
 4. **Done.** Regression gate on merges: CI builds the stack on kind, replays the scenarios with the mock model and fails a regression against the baseline in git, or an unbaselined change to a scenario, the prompt or the model; a deliberately regressed agent fails it (`make eval-gate test-eval-gate`, `.github/workflows/eval-gate.yml`). Prompt changes aren't scored by the mock (GAP-08).
-5. **Next.** Oversight and safety metrics; kill-switch test in the suite.
+5. **Done.** Oversight and safety metrics: reopen rate, oversight health per approver with rubber-stamp and override alerts, and the latest eval run beside throughput, all from records the agent can't write or forge; a kill-switch drill in the eval suite, run in CI after the gate (`make eval-kill-switch test-oversight`). P4's Musts are done; P4-15 (seeded known-bad proposals) remains.
 
 ### P5: local inference
-1. Model serving outside the cluster (Docker `--gpus all`) as a fallback.
+1. **Next.** Model serving outside the cluster (Docker `--gpus all`) as a fallback.
 2. In-cluster GPU via device plugin (k3s on WSL2 first, bare metal if needed).
 3. Serving stack behind the Gateway API Inference Extension (or KServe/llm-d); autoscaling on queue depth.
 4. GPU metrics.
@@ -73,7 +73,7 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 
 ## Engineering hygiene backlog
 
-- **CI.** The eval gate runs on every PR (P4 M4). Still to add: lint, the Go and Python unit tests, and the other suites on kind.
+- **CI.** The eval gate and the kill-switch drill run on every PR (P4 M4, M5). Still to add: lint, the Go and Python unit tests, and the other suites on kind.
 - **Image pinning and signing** (SEC-30). Pin base images by digest, and sign and verify our own images.
 - **`gitleaks`** in CI.
 - **Repo README threat-model section** linking to [03-security.md](03-security.md).

@@ -8,7 +8,10 @@
 # identity may get /metrics and nothing else. The gateways' metrics are
 # on a port that only this pod may reach (network policy).
 #
-# The alerting rules (alerts.yml) watch the audit sink's counters (P4-04).
+# The alerting rules (alerts.yml) watch the audit sink's counters (P4-04),
+# and whether oversight is working and the agent is still good (P4-21,
+# P4-22): rubber-stamp approvals, overridden critical findings, reopened
+# changes, and the latest eval run.
 # There's no Alertmanager here: alerts show in Prometheus's alerts page
 # and API.
 apiVersion: v1
@@ -112,6 +115,45 @@ data:
         labels: {severity: page}
         annotations:
           summary: "the audit sink is down; events reach only the node's log"
+    # Oversight health (P4-21) and quality (P4-22), from the controller's
+    # metrics: derived from the ChangeRequests and EvalRuns kept in the
+    # cluster, which the agent can't write or forge.
+    - name: safe-ops-oversight
+      rules:
+      # Approving nearly everything, quickly, over enough decisions to
+      # mean something: the approver is likely not reading the packet.
+      - alert: RubberStampApprovals
+        expr: |
+          (sum by (approver) (safeops_approver_decisions{decision="approved"}) / sum by (approver) (safeops_approver_decisions) >= 0.95)
+          and on (approver) (sum by (approver) (safeops_approver_decisions) >= 10)
+          and on (approver) (safeops_approver_decision_seconds{quantile="0.5"} < 30)
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $labels.approver }} approves {{ $value | humanizePercentage }} of requests, with a median review under 30s"
+      # A human approved a request the review rules marked Critical
+      # (approvalctl approve --accept-critical): an override, to be looked at.
+      # The metric is a gauge whose series appears with an approver's first
+      # decision: a new series above zero counts as well as a rise.
+      - alert: CriticalFindingApproved
+        expr: |
+          (safeops_approver_approvals_flagged{severity="critical"} > 0
+            unless safeops_approver_approvals_flagged{severity="critical"} offset 15m)
+          or
+          (safeops_approver_approvals_flagged{severity="critical"}
+            > safeops_approver_approvals_flagged{severity="critical"} offset 15m)
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $labels.approver }} approved a request with a Critical finding"
+      - alert: ChangesReopened
+        expr: (safeops_changerequests_reopened / safeops_changerequests_applied > 0.2) and on () (safeops_changerequests_applied >= 5)
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of applied changes were followed within an hour by another for the same target"
+      - alert: EvalSafetyNotHeld
+        expr: safeops_eval_last_run_safety_held == 0
+        labels: {severity: page}
+        annotations:
+          summary: "safety didn't hold in eval run {{ $labels.run }}: something unsafe got through"
 ---
 apiVersion: apps/v1
 kind: Deployment

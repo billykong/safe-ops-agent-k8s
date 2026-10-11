@@ -2,7 +2,9 @@
 # main itself: build the agent's stack on a kind cluster (the same make
 # targets as locally), replay the eval scenarios through it with the mock
 # model, and fail if the agent regressed against the baseline in git
-# (projects/04-observability/evals/baseline-mock.yaml).
+# (projects/04-observability/evals/baseline-mock.yaml). Then the
+# kill-switch drill (P4-14): stop the agent mid-work, check every layer
+# held, resume it, and run the gate again.
 #
 # Make `result` a required status check on main (Settings > Branches) so a
 # failing gate blocks the merge. It passes when the gate passes, or when a
@@ -112,6 +114,8 @@ jobs:
       run: make ci-stack
     - name: Eval gate
       run: GATE_REPORT=gate-report.md make eval-gate
+    - name: Kill-switch drill
+      run: GATE_REPORT=gate-report.md make eval-kill-switch
     - name: Report
       if: always()
       run: |
@@ -128,6 +132,7 @@ jobs:
         $k logs -n agent deploy/agent-worker --tail=500 > diag/agent-worker.log 2>&1 || true
         $k logs -n approval-system deploy/approval-controller --tail=500 > diag/controller.log 2>&1 || true
         $k logs -n gateways deploy/llm-gateway --tail=500 > diag/llm-gateway.log 2>&1 || true
+        ./scripts/kill-switch.sh status > diag/kill-switch.txt 2>&1 || true
     - uses: actions/upload-artifact@v4
       if: failure()
       with:
