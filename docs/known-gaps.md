@@ -12,6 +12,7 @@ Weaknesses we know about, have reproduced, and haven't closed yet. Each has an I
 | [GAP-06](#gap-06-the-collector-cant-tell-who-sent-a-span) | The collector can't tell who sent a span | Low (traces are a debugging aid; the numbers that matter are scraped from the gateways and controller) | Open | [P4-01](prd/projects/p4-observability-evals.md) |
 | [GAP-07](#gap-07-a-long-audit-sink-outage-loses-events-from-the-sink) | A long audit sink outage loses events from the sink | Low (the node's log keeps them, and the drop alerts) | Open | [P4-04](prd/projects/p4-observability-evals.md) |
 | [GAP-08](#gap-08-the-ci-gate-cant-score-a-prompt-or-model-change) | The CI gate can't score a prompt or model change | Medium (a prompt change needs a deliberate re-baseline, but nothing checks it was tested on the real model) | Open | [P4-13](prd/projects/p4-observability-evals.md) |
+| [GAP-09](#gap-09-the-node-can-reach-the-local-model-server) | The node can reach the local model server | Low (needs root on the node or a host-network pod, and then the key) | Open | [P5-07](prd/projects/p5-local-inference.md) |
 
 ## GAP-01: domain fronting through the PyPI egress allowlist
 
@@ -248,4 +249,29 @@ A prompt or model change merges after a re-baseline that is visible in the diff 
 ### Status
 
 Open. Revisit with P5 (local inference), and before anyone else can change the prompt.
+
+## GAP-09: the node can reach the local model server
+
+**Found:** 2026-10-11, P5 milestone 1. **Reproduced by:** `make test-local-model`, section "Negative controls", reported as `GAP GAP-09`.
+
+### What's wrong
+
+The local model server runs outside the cluster on a Docker network that only the kind node joins. Cilium's policies decide which pods may connect to it, and only the LLM gateway may. But the node's own network namespace isn't a pod: Cilium's pod policy doesn't apply to it. So the node, and any pod with `hostNetwork: true`, connects to the server's port. On WSL2 the host does too, through the Docker bridge's address. vLLM's key then stops a request to `/v1`; `/health`, `/version` and `/metrics` answer anyone who connects.
+
+### Impact
+
+Low. A host-network pod needs a namespace whose Pod Security admits it (the agent's namespaces enforce `restricted`, and the agent can't create pods anywhere else), and the node or host means root on them already. Then the key is still needed, and only the gateway mounts it. What leaks without the key is the server's version and request counts, no content.
+
+### Options
+
+| Option | Closes it? | Cost |
+| --- | --- | --- |
+| Cilium host policies (`CiliumClusterwideNetworkPolicy` with a `nodeSelector`) denying the node's egress to the server's network | For host-network pods and the node's processes; not for the WSL host | Host policy enforcement (`hostFirewall.enabled`), which applies to all of the node's traffic: easy to cut kubelet off by mistake |
+| Mutual TLS between the gateway and the server (a client certificate only the gateway holds), in front of vLLM | Yes, apart from `/health` if left open | A TLS proxy beside vLLM, and certificates to rotate |
+| Move the server into the cluster (P5 M2), behind pod policy | For the node only if host-network pods are refused | Needs in-cluster GPU scheduling, which is milestone 2's question |
+| Accept: the key holds | No | None |
+
+### Status
+
+Open. Revisit with P5 M2: an in-cluster server takes the node out of the path.
 

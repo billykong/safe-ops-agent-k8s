@@ -8,6 +8,11 @@ kubeProxyReplacement: true
 k8sServiceHost: safe-ops-control-plane
 k8sServicePort: 6443
 installIptablesRules: false
+# Every eth* device, including ones added later: the model server's
+# network (P5, scripts/model-server.sh) is a second interface on the node,
+# eth1. Auto-detection only takes the device with the default route, so
+# pod traffic left through eth1 unmasqueraded and the replies had no route.
+devices: eth+
 bpf:
   masquerade: true
   # eBPF TPROXY redirects DNS to Cilium's DNS proxy (toFQDNs policies).

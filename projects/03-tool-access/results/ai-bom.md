@@ -1,13 +1,27 @@
 # AI bill of materials
 
-Generated 2026-10-10T09:08:15Z by `scripts/ai-bom.sh` from the code and the running cluster (P3-23).
+Generated 2026-10-11T11:02:27Z by `scripts/ai-bom.sh` from the code and the running cluster (P3-23).
 
 ## Models
 
 | Use | Model | Settings |
 | --- | --- | --- |
 | Agent (`AgentWorkflow`) | `claude-opus-5-5` | effort medium, max_tokens 8000, up to 6 model calls per decision, refusal fallbacks `default` |
-| LLM gateway allows | `claude-opus-5-5` | upstream `http://mock-model.gateways.svc.cluster.local:8080` |
+| LLM gateway allows | `claude-opus-5-5`, `claude-sonnet-5-5`, `qwen2.5-1.5b-instruct` | upstream `http://mock-model.gateways.svc.cluster.local:8080` |
+| Self-hosted (P5), via the gateway | `qwen2.5-1.5b-instruct`: `Qwen/Qwen2.5-1.5B-Instruct-AWQ` at `3ecffa0ceb27851800f45519bab9c457a04405e1` | `http://172.30.99.10:8000`; image `safe-ops-vllm:0.30.0-cu129` (`sha256:5de878c2569f023ce3d21402b65a0de8e2461a3f33c81f8ec5c67ff256d96afd`) |
+
+### `qwen2.5-1.5b-instruct` weights (lock `projects/05-local-inference/models/qwen2.5-1.5b-instruct-awq.sha256`)
+
+| File | SHA-256 |
+| --- | --- |
+| `LICENSE` | `sha256:832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e` |
+| `config.json` | `sha256:61cefa4671101141de551f7b46faa45dc792cba654848ee5bb8e55bebe8b6f5d` |
+| `generation_config.json` | `sha256:091fc0fd8cf33ecb3ded1399ffe17cca80fefdb167ac4c241c1ca42c6bc116e5` |
+| `merges.txt` | `sha256:599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3` |
+| `model.safetensors` | `sha256:5b29ed6f80e422c3ae7d40dc76fd8983501bbd7489cf84a72a5c5fe20bcf2813` |
+| `tokenizer.json` | `sha256:c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539` |
+| `tokenizer_config.json` | `sha256:5b5d4f65d0acd3b2d56a35b56d374a36cbc1c8fa5cf3b3febbbfabf22f359583` |
+| `vocab.json` | `sha256:ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910` |
 
 ## Prompts
 
@@ -40,12 +54,12 @@ Generated 2026-10-10T09:08:15Z by `scripts/ai-bom.sh` from the code and the runn
 
 | Component | Image | Digest running |
 | --- | --- | --- |
-| agent/agent-worker | `docker.io/library/approval-agent:dev` | `sha256:89f5aa94349ea77980ab57e5a13473434c3ce32c44c8c9e772395e3379d5897c` |
-| approval-system/approval-controller | `docker.io/library/approval-controller:dev` | `sha256:1cf0bac0b4dd499ef5279209859486ab0655b7acafb7290f3d4433f869497dd0` |
-| gateways/llm-gateway | `docker.io/library/agent-gateway:dev` | `sha256:628fbbe6eeb0a68824772f319f9b4c4dd8e64f91432966e9efac3a1cc212d004` |
-| gateways/mcp-gateway | `docker.io/library/mcp-gateway:dev` | `sha256:7e19a8b719e828eb85ecdf43cee9cbb84334d47cf8230d0b85dfa91c331370d6` |
-| gateways/mock-model | `docker.io/library/mock-model:dev` | `sha256:6b67981982e8ee095eec4998918fb317389dd58c5d43d75619203e47eba0b11e` |
-| mcp-servers/incident-tracker | `docker.io/library/mcp-tools:dev` | `sha256:67b296d676fff078628d31dd25c2d8c758ae8d1b639d8a5038e007e34bd22699` |
-| mcp-servers/incidents-mcp | `docker.io/library/mcp-tools:dev` | `sha256:67b296d676fff078628d31dd25c2d8c758ae8d1b639d8a5038e007e34bd22699` |
-| mcp-servers/netdiag-mcp | `docker.io/library/mcp-tools:dev` | `sha256:67b296d676fff078628d31dd25c2d8c758ae8d1b639d8a5038e007e34bd22699` |
+| agent/agent-worker | `docker.io/library/approval-agent:dev` | `sha256:095626c9d3d58387c1a5bcca239e1ccba483337b92bf02e96a51f2892f4a3606` |
+| approval-system/approval-controller | `docker.io/library/approval-controller:dev` | `sha256:f26572b196d321948b3645dcd7ba54db0e93a6965f9f6ea527ef1435335b2d6a` |
+| gateways/llm-gateway | `docker.io/library/agent-gateway:dev` | `sha256:a5596d2f35ae997042ad5b8b03d4f99ad8222d6ff1553dceb78482c9684b61b6` |
+| gateways/mcp-gateway | `docker.io/library/mcp-gateway:dev` | `sha256:6877b4e38758ab9e801effec00fa7bc9b6675b04389dabe958a8496fce58c345` |
+| gateways/mock-model | `docker.io/library/mock-model:dev` | `sha256:00840adc1c42c955396518122a26a95b1ca3a12a47a6616d3f6c5cced7bbfdce` |
+| mcp-servers/incident-tracker | `docker.io/library/mcp-tools:dev` | `sha256:274501726b1541ac991891b0f4178cc355a4a895d5013dbf4d40762b87b7fb4b` |
+| mcp-servers/incidents-mcp | `docker.io/library/mcp-tools:dev` | `sha256:274501726b1541ac991891b0f4178cc355a4a895d5013dbf4d40762b87b7fb4b` |
+| mcp-servers/netdiag-mcp | `docker.io/library/mcp-tools:dev` | `sha256:274501726b1541ac991891b0f4178cc355a4a895d5013dbf4d40762b87b7fb4b` |
 | temporal/temporal | `docker.io/temporalio/temporal:1.9.1` | `sha256:e1534f2d0aa0ce2d79375ce20ac15a3405fc51c3e7bd374f4ac204bc94e1252c` |

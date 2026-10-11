@@ -4,8 +4,10 @@
 //  2. is checked as data (internal/policy): allowed model, bounded
 //     max_tokens, no streaming, no server tools or remote MCP;
 //  3. reserves tokens against the identity's budget (internal/budget);
-//  4. is sent upstream with the provider key, read from a mounted Secret,
-//     and none of the agent's own headers (its token never leaves);
+//  4. is sent upstream with that upstream's key, read from a mounted
+//     Secret, and none of the agent's own headers (its token never
+//     leaves): the provider, or for the models in ROUTES a self-hosted
+//     server with its own key (P5, internal/upstream);
 //  5. is charged its actual usage, and logged.
 //
 // It is also where model use is measured (P4-01, P4-02): a span per
@@ -29,6 +31,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +49,7 @@ import (
 	"github.com/billykong/safe-ops-agent-k8s/projects/03-tool-access/gateway/internal/policy"
 	"github.com/billykong/safe-ops-agent-k8s/projects/03-tool-access/gateway/internal/pricing"
 	"github.com/billykong/safe-ops-agent-k8s/projects/03-tool-access/gateway/internal/telemetry"
+	"github.com/billykong/safe-ops-agent-k8s/projects/03-tool-access/gateway/internal/upstream"
 )
 
 const maxBody = 1 << 20
@@ -55,8 +59,7 @@ type gateway struct {
 	authn    *authn.Authenticator
 	policy   policy.Config
 	budget   *budget.Limiter
-	upstream string
-	keyFile  string
+	upstream upstream.Router
 	client   *http.Client
 	prices   pricing.Table
 	m        metrics
@@ -129,6 +132,10 @@ func main() {
 	if err != nil {
 		fail("PRICES", err)
 	}
+	routes, err := upstream.ParseRoutes(env("ROUTES", ""), env("ROUTE_PROVIDER", "vllm"), env("ROUTE_KEY_FILE", ""))
+	if err != nil {
+		fail("ROUTES", err)
+	}
 	reg := prometheus.NewRegistry()
 	g := &gateway{
 		log:    log,
@@ -151,9 +158,12 @@ func main() {
 			Window:            dur("BUDGET_WINDOW", "1h"),
 			RequestsPerMinute: num("REQUESTS_PER_MINUTE", "30"),
 		},
-		upstream: strings.TrimRight(env("UPSTREAM_URL", "https://api.anthropic.com"), "/"),
-		keyFile:  env("API_KEY_FILE", "/var/run/secrets/safe-ops.io/upstream/api-key"),
-		client:   &http.Client{Timeout: dur("UPSTREAM_TIMEOUT", "120s")},
+		upstream: upstream.Router{
+			Default: upstream.Upstream{URL: strings.TrimRight(env("UPSTREAM_URL", "https://api.anthropic.com"), "/"),
+				Provider: "anthropic", KeyFile: env("API_KEY_FILE", "/var/run/secrets/safe-ops.io/upstream/api-key")},
+			Routes: routes,
+		},
+		client: &http.Client{Timeout: dur("UPSTREAM_TIMEOUT", "120s")},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
@@ -185,7 +195,12 @@ func main() {
 		}
 	}()
 	addr := env("LISTEN", ":8080")
-	log.Info("listening", "addr", addr, "upstream", g.upstream, "models", g.policy.Models, "maxTokensCap", g.policy.MaxTokensCap,
+	for m := range routes {
+		if !slices.Contains(g.policy.Models, m) {
+			log.Warn("routed model isn't in MODELS: its requests are refused", "model", m)
+		}
+	}
+	log.Info("listening", "addr", addr, "upstream", g.upstream.Default.URL, "routes", env("ROUTES", ""), "models", g.policy.Models, "maxTokensCap", g.policy.MaxTokensCap,
 		"budgetTokens", g.budget.TokensPerWindow, "budgetWindow", g.budget.Window.String(), "allowed", g.authn.Allowed)
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	if err := srv.ListenAndServe(); err != nil {
@@ -237,7 +252,7 @@ func (g *gateway) messages(w http.ResponseWriter, r *http.Request) {
 	// One span per request, in the agent's trace if it sent one, named
 	// "chat <model>" once the model is known (GenAI conventions).
 	ctx, span := telemetry.Tracer().Start(telemetry.Extract(r), "chat", trace.WithSpanKind(trace.SpanKindServer),
-		trace.WithAttributes(attribute.String("gen_ai.operation.name", "chat"), attribute.String("gen_ai.provider.name", "anthropic")))
+		trace.WithAttributes(attribute.String("gen_ai.operation.name", "chat")))
 	defer span.End()
 	r = r.WithContext(ctx)
 	var (
@@ -265,7 +280,9 @@ func (g *gateway) messages(w http.ResponseWriter, r *http.Request) {
 	req, err := policy.Check(g.policy, body, r.Header.Values("anthropic-beta"))
 	model = g.knownModel(req.Model)
 	span.SetName("chat " + model)
-	span.SetAttributes(attribute.String("gen_ai.request.model", model), attribute.Int("gen_ai.request.max_tokens", req.MaxTokens))
+	to := g.upstream.For(model)
+	span.SetAttributes(attribute.String("gen_ai.request.model", model), attribute.Int("gen_ai.request.max_tokens", req.MaxTokens),
+		attribute.String("gen_ai.provider.name", to.Provider))
 	if err != nil {
 		outcome = "policy"
 		audit(400, "model", req.Model, "reason", err.Error())
@@ -287,27 +304,21 @@ func (g *gateway) messages(w http.ResponseWriter, r *http.Request) {
 	charged := 0
 	defer func() { g.budget.Settle(id.Username, req.MaxTokens, charged) }()
 
-	key, err := os.ReadFile(g.keyFile)
+	key, err := os.ReadFile(to.KeyFile)
 	if err != nil || len(bytes.TrimSpace(key)) == 0 {
 		outcome = "unavailable"
-		audit(503, "model", req.Model, "reason", "no provider key mounted")
-		writeError(w, http.StatusServiceUnavailable, "model_unavailable", "the gateway has no provider key")
+		audit(503, "model", req.Model, "reason", "no key mounted for "+to.Provider)
+		writeError(w, http.StatusServiceUnavailable, "model_unavailable", "the gateway has no key for this model's server")
 		return
 	}
-	up, err := http.NewRequestWithContext(r.Context(), http.MethodPost, g.upstream+"/v1/messages", bytes.NewReader(body))
+	up, err := http.NewRequestWithContext(r.Context(), http.MethodPost, to.URL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
 		outcome = "unavailable"
 		writeError(w, http.StatusInternalServerError, "api_error", err.Error())
 		return
 	}
-	// Only these headers go upstream. Not the agent's Authorization (its
-	// identity token), not anything else it sent.
-	up.Header.Set("content-type", "application/json")
-	up.Header.Set("x-api-key", string(bytes.TrimSpace(key)))
-	up.Header.Set("anthropic-version", firstNonEmpty(r.Header.Get("anthropic-version"), "2023-06-01"))
-	for _, b := range r.Header.Values("anthropic-beta") {
-		up.Header.Add("anthropic-beta", b)
-	}
+	upstream.SetHeaders(up.Header, to, string(bytes.TrimSpace(key)),
+		firstNonEmpty(r.Header.Get("anthropic-version"), "2023-06-01"), r.Header.Values("anthropic-beta"))
 	resp, err := g.client.Do(up)
 	if err != nil {
 		outcome = "unavailable"

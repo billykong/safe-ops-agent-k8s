@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability audit test-audit evals test-evals ci-stack eval-gate test-eval-gate eval-kill-switch test-oversight
+.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability audit test-audit evals test-evals ci-stack eval-gate test-eval-gate eval-kill-switch test-oversight p5 model-server-down test-local-model
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -314,3 +314,22 @@ eval-kill-switch:
 
 test-oversight:
 	./scripts/test-oversight.sh
+
+# P5 milestone 1: a local model outside the cluster (P5-02): vLLM in Docker
+# on the host's GPU, on a network only this cluster's node joins, reached
+# through the LLM gateway only. `p5` verifies the pinned weights, starts the
+# server and applies the policies; model-server-down frees the GPU.
+P5 := projects/05-local-inference
+
+p5:
+	./scripts/model-server.sh up
+	$(KUBECTL) apply -f $(P5)/manifests/
+	# The gateway mounts the server's key (Secret local-model-key, optional).
+	$(KUBECTL) -n gateways rollout restart deploy/llm-gateway
+	$(KUBECTL) -n gateways rollout status deploy/llm-gateway --timeout=120s
+
+model-server-down:
+	./scripts/model-server.sh down
+
+test-local-model:
+	./scripts/test-local-model.sh

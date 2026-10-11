@@ -1,0 +1,16 @@
+# Qwen2.5-1.5B-Instruct, AWQ 4-bit (Apache-2.0), served as qwen2.5-1.5b-instruct.
+# Every file vLLM loads, pinned by SHA-256 at one revision. scripts/model-server.sh
+# fetch downloads them from this revision and refuses the set unless all match;
+# the server only ever loads the verified copy (P5-08). model.safetensors' hash is
+# the one Hugging Face publishes for the file (its LFS object id).
+# repo: Qwen/Qwen2.5-1.5B-Instruct-AWQ
+# revision: 3ecffa0ceb27851800f45519bab9c457a04405e1
+# served-name: qwen2.5-1.5b-instruct
+832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e  LICENSE
+61cefa4671101141de551f7b46faa45dc792cba654848ee5bb8e55bebe8b6f5d  config.json
+091fc0fd8cf33ecb3ded1399ffe17cca80fefdb167ac4c241c1ca42c6bc116e5  generation_config.json
+599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3  merges.txt
+5b29ed6f80e422c3ae7d40dc76fd8983501bbd7489cf84a72a5c5fe20bcf2813  model.safetensors
+c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539  tokenizer.json
+5b5d4f65d0acd3b2d56a35b56d374a36cbc1c8fa5cf3b3febbbfabf22f359583  tokenizer_config.json
+ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910  vocab.json

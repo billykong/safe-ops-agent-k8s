@@ -66,6 +66,9 @@ reforward() {
 gw_env() { # NAME=VALUE...: change the gateway's settings (restarts it, so budgets start afresh)
   kubectl set env -n gateways deploy/llm-gateway "$@" >/dev/null
   kubectl rollout status -n gateways deploy/llm-gateway --timeout=120s >/dev/null
+  # The old pod takes up to 30s to go, and a port-forward to the Service
+  # may pick it: then every request fails once it's gone (curl 000).
+  for _ in $(seq 1 60); do [ "$(kubectl get pods -n gateways -l app=llm-gateway --no-headers | wc -l)" = 1 ] && break; sleep 1; done
   reforward
 }
 cleanup() {

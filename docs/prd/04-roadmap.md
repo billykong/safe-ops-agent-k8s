@@ -57,8 +57,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 5. **Done.** Oversight and safety metrics: reopen rate, oversight health per approver with rubber-stamp and override alerts, and the latest eval run beside throughput, all from records the agent can't write or forge; a kill-switch drill in the eval suite, run in CI after the gate (`make eval-kill-switch test-oversight`). P4's Musts are done; P4-15 (seeded known-bad proposals) remains.
 
 ### P5: local inference
-1. **Next.** Model serving outside the cluster (Docker `--gpus all`) as a fallback.
-2. In-cluster GPU via device plugin (k3s on WSL2 first, bare metal if needed).
+1. **Done.** Model serving outside the cluster as a fallback: vLLM in Docker on the host's GPU, on a network only the cluster's node joins, reached through the LLM gateway only, with hash-verified safetensors weights; used as an eval judge (`make p5 test-local-model`).
+2. **Next.** In-cluster GPU via device plugin (k3s on WSL2 first, bare metal if needed).
 3. Serving stack behind the Gateway API Inference Extension (or KServe/llm-d); autoscaling on queue depth.
 4. GPU metrics.
 
