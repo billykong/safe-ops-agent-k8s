@@ -11,6 +11,7 @@ Weaknesses we know about, have reproduced, and haven't closed yet. Each has an I
 | [GAP-05](#gap-05-narrow-channels-through-allowed-tool-arguments) | Narrow channels through allowed tool arguments | Low (about 20 bits a call, to the incident tracker only) | Open (accepted) | [P3-31](prd/projects/p3-tool-identity-policy.md) |
 | [GAP-06](#gap-06-the-collector-cant-tell-who-sent-a-span) | The collector can't tell who sent a span | Low (traces are a debugging aid; the numbers that matter are scraped from the gateways and controller) | Open | [P4-01](prd/projects/p4-observability-evals.md) |
 | [GAP-07](#gap-07-a-long-audit-sink-outage-loses-events-from-the-sink) | A long audit sink outage loses events from the sink | Low (the node's log keeps them, and the drop alerts) | Open | [P4-04](prd/projects/p4-observability-evals.md) |
+| [GAP-08](#gap-08-the-ci-gate-cant-score-a-prompt-or-model-change) | The CI gate can't score a prompt or model change | Medium (a prompt change needs a deliberate re-baseline, but nothing checks it was tested on the real model) | Open | [P4-13](prd/projects/p4-observability-evals.md) |
 
 ## GAP-01: domain fronting through the PyPI egress allowlist
 
@@ -220,3 +221,31 @@ The audit record is complete only in the node's log (`/var/log/kubernetes/audit/
 ### Status
 
 Open. Revisit when the audit log feeds anything automated (evals, P4 milestone 3), or before running on a multi-node control plane.
+
+## GAP-08: the CI gate can't score a prompt or model change
+
+**Found:** 2026-10-11, P4 milestone 4. **Reproduced by:** `make test-eval-gate`, section "A prompt regression scores the same with the mock", reported as `GAP GAP-08`.
+
+### What's wrong
+
+CI runs the eval scenarios with the mock model: deterministic, free, and needing no key in a pull request. The mock decides from the operator's instruction and the tools it's offered, not from the agent's system prompt or the model the agent asks for. So the gate scores regressions in the agent's code, its tools, the gateways, the controller and the gate's policy, but a prompt or model change scores exactly as before. The suite builds an agent whose prompt no longer sends unclear or unsafe instructions to a human, and its run matches the baseline scenario for scenario.
+
+The gate doesn't let that pass silently: the baseline records the agent's model and prompt hash, and a change to either fails the gate until the baseline is rewritten in the same change. But rewriting it only takes another mock run. Nothing checks that the new prompt was run against the real model first.
+
+### Impact
+
+A prompt or model change merges after a re-baseline that is visible in the diff (and needs the code owner's review, `.github/CODEOWNERS`), not after evidence that the agent still behaves. The scenarios that matter most here, escalating vague or injected instructions, are the ones a prompt change is most likely to break. The approval gate and the human approver still stand behind it: a worse prompt makes worse proposals, not unreviewed changes.
+
+### Options
+
+| Option | Closes it? | Cost |
+| --- | --- | --- |
+| A live job in CI: the real model through the gateway, with the provider key as a repository secret, on pull requests from this repository only | Yes, for changes from maintainers | Model spend per run; nondeterministic scores need repeated runs or a tolerance; a key in CI |
+| Record live runs: `--rebaseline` on a live gateway writes `baseline-live.yaml`, and the gate requires a live baseline whose prompt hash matches the agent's | Mostly: proves a live run happened with this prompt, on the maintainer's cluster; CI can't verify it was that run's result | A maintainer's time and spend per prompt change |
+| A local model as the agent's stand-in in CI (P5) | Partly: catches gross prompt regressions, not the production model's behaviour | GPU runner or slow CPU inference |
+| Accept: re-baseline by review | No | None |
+
+### Status
+
+Open. Revisit with P5 (local inference), and before anyone else can change the prompt.
+

@@ -1,0 +1,23 @@
+diff --git a/projects/02-approval-gate/durable/agent/model.py b/projects/02-approval-gate/durable/agent/model.py
+index 841b118..2df22f3 100644
+--- a/projects/02-approval-gate/durable/agent/model.py
++++ b/projects/02-approval-gate/durable/agent/model.py
+@@ -38,6 +38,9 @@ MCP_TOKEN_FILE = os.environ.get("MCP_GATEWAY_TOKEN_FILE", "/var/run/secrets/safe
+ # Model calls per decision: reading tools, then one action.
+ MAX_STEPS = int(os.environ.get("AGENT_MAX_STEPS", "6"))
+ MAX_TOOL_CALLS_PER_STEP = 3
++# The namespaces' replica ceiling: proposing more only gets a proposal
++# denied, so propose the most that can go through instead.
++MAX_REPLICAS = 20
+ 
+ # Kept in git with the code (P3-22); its hash is logged with each decision.
+ SYSTEM = """You are an operations agent for a Kubernetes cluster. You are given one Deployment and an operator's instruction about it, plus its current state as read from the cluster.
+@@ -217,7 +220,7 @@ async def _decide(goal: Goal, obs: Observation) -> ModelDecision:
+                     return ModelDecision(action="Escalate", reason=reason, detail="the model chose to escalate", escalation="model_chose", **kw)
+                 if call.name == "propose_restart_deployment":
+                     return ModelDecision(action="RestartDeployment", reason=reason, **kw)
+-                return ModelDecision(action="ScaleDeployment", reason=reason, replicas=call.input["replicas"], **kw)
++                return ModelDecision(action="ScaleDeployment", reason=reason, replicas=min(call.input["replicas"], MAX_REPLICAS), **kw)
+             if not lookups:
+                 return escalate(f"the model gave no action (stop_reason {resp.stop_reason})", "no_action", request_id=rid, tools_used=used)
+             if len(lookups) > MAX_TOOL_CALLS_PER_STEP:

@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability audit test-audit evals test-evals
+.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability audit test-audit evals test-evals ci-stack eval-gate test-eval-gate
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -20,7 +20,7 @@ up:
 	# Write its kubeconfig to a separate file, then merge it in without
 	# touching current-context (the first file in KUBECONFIG wins).
 	set -e; tmp=$$(mktemp -d); trap 'rm -rf $$tmp' EXIT; mkdir -p $$HOME/.kube; touch $$HOME/.kube/config; \
-	kind create cluster --config cluster/kind-gvisor.yaml --kubeconfig $$tmp/kind; \
+	kind create cluster --name $(CLUSTER) --config cluster/kind-gvisor.yaml --kubeconfig $$tmp/kind; \
 	for k in context cluster user; do kubectl config delete-$$k kind-$(CLUSTER) >/dev/null 2>&1 || true; done; \
 	KUBECONFIG=$$HOME/.kube/config:$$tmp/kind kubectl config view --flatten > $$tmp/merged; \
 	install -m 600 $$tmp/merged $$HOME/.kube/config
@@ -59,7 +59,8 @@ node-swap-off:
 cilium:
 	helm repo add cilium https://helm.cilium.io >/dev/null 2>&1 || true
 	helm upgrade --install cilium cilium/cilium --version $(CILIUM_VERSION) \
-	  --kube-context kind-$(CLUSTER) --namespace kube-system -f cluster/cilium-values.yaml --wait --timeout 10m
+	  --kube-context kind-$(CLUSTER) --namespace kube-system -f cluster/cilium-values.yaml \
+	  --set k8sServiceHost=$(CLUSTER)-control-plane --wait --timeout 10m
 	# Agents read their config at start; a changed value needs a restart.
 	$(KUBECTL) -n kube-system rollout restart ds/cilium deploy/cilium-operator
 	$(KUBECTL) -n kube-system rollout status ds/cilium --timeout=180s
@@ -285,3 +286,21 @@ evals:
 
 test-evals:
 	./scripts/test-evals.sh
+
+# P4 milestone 4: the eval regression gate (P4-13). eval-gate runs the
+# replay evals and compares them with the baseline in git; CI
+# (.github/workflows/eval-gate.yml) runs ci-stack then eval-gate on a fresh
+# cluster: just what the evals need, in mock mode.
+# The agent's namespace and identities come from P1's manifests; CI skips
+# P1's sandboxes (images, warm pools), which the evals don't use.
+ci-stack: up
+	$(KUBECTL) apply -f $(P1)/manifests/10-namespace.yaml -f $(P1)/manifests/50-agent-namespace.yaml \
+	  -f $(P1)/manifests/51-agent-rbac.yaml -f $(P1)/manifests/52-agent-networkpolicy.yaml \
+	  -f $(P1)/manifests/53-claim-admission-policy.yaml
+	$(MAKE) p2 durable p3 evals
+
+eval-gate:
+	./scripts/eval-gate.sh
+
+test-eval-gate:
+	./scripts/test-eval-gate.sh

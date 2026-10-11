@@ -1,0 +1,151 @@
+# The eval regression gate (P4-13). On every pull request to main, and on
+# main itself: build the agent's stack on a kind cluster (the same make
+# targets as locally), replay the eval scenarios through it with the mock
+# model, and fail if the agent regressed against the baseline in git
+# (projects/04-observability/evals/baseline-mock.yaml).
+#
+# Make `result` a required status check on main (Settings > Branches) so a
+# failing gate blocks the merge. It passes when the gate passes, or when a
+# change touches only docs.
+#
+# Pull requests run with a read-only token and no secrets: the stack uses
+# the mock model, so nothing here needs a key. Never switch this to
+# pull_request_target, which would run a fork's code with this repo's
+# permissions.
+name: eval-gate
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      regression:
+        description: Build the agent with a deliberate regression (projects/04-observability/evals/regressions/), to see the gate fail
+        type: choice
+        options: [none, clamp-replicas]
+        default: none
+permissions:
+  contents: read
+concurrency:
+  group: eval-gate-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  KIND_VERSION: v0.33.0
+  HELM_VERSION: v4.3.0
+jobs:
+  # Docs-only changes skip the cluster. Anything else (agent, gateways,
+  # controller, policy, scenarios, scripts, this file) runs the gate.
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      run: ${{ steps.diff.outputs.run }}
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+    - id: diff
+      env:
+        BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      run: |
+        if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+          echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+        fi
+        changed=$(git diff --name-only "$BASE" HEAD)
+        echo "$changed"
+        if grep -vqE '^docs/|\.md$|/results/' <<<"$changed"; then run=true; else run=false; fi
+        echo "run=$run" >> "$GITHUB_OUTPUT"
+
+  unit:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v5
+    - uses: actions/setup-python@v6
+      with:
+        python-version: "3.13"
+    - run: pip install pyyaml==6.0.2
+    - name: Gate unit tests
+      working-directory: projects/04-observability/evals/gate
+      run: python -m unittest -v test_eval_gate.py
+
+  eval-gate:
+    needs: [changes, unit]
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+    - uses: actions/checkout@v5
+    - name: Free disk space
+      run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost && df -h /
+    - uses: actions/setup-python@v6
+      with:
+        python-version: "3.13"
+    - run: pip install pyyaml==6.0.2
+    - uses: actions/setup-go@v6
+      with:
+        go-version-file: projects/03-tool-access/gateway/go.mod
+        cache-dependency-path: |
+          projects/02-approval-gate/go.sum
+          projects/03-tool-access/gateway/go.sum
+    - name: Install kind and helm
+      run: |
+        # Through Go modules: verified against the Go checksum database.
+        go install sigs.k8s.io/kind@$KIND_VERSION
+        go install helm.sh/helm/v4/cmd/helm@$HELM_VERSION
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+    - name: Install gVisor
+      # cluster/kind-gvisor.yaml mounts the host's runsc into the node, as
+      # scripts/setup-host.sh installs it locally.
+      run: |
+        curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor.gpg
+        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/gvisor.gpg] https://storage.googleapis.com/gvisor/releases release main" \
+          | sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
+        sudo apt-get update -q && sudo apt-get install -yq runsc
+        sudo mkdir -p /usr/bin/gvisor-bin
+        sudo sysctl -w fs.inotify.max_user_watches=524288 fs.inotify.max_user_instances=512
+    - name: Apply a deliberate regression
+      if: inputs.regression && inputs.regression != 'none'
+      env:
+        REGRESSION: ${{ inputs.regression }}
+      run: git apply "projects/04-observability/evals/regressions/$REGRESSION.patch" && git diff --stat
+    - name: Build the stack
+      run: make ci-stack
+    - name: Eval gate
+      run: GATE_REPORT=gate-report.md make eval-gate
+    - name: Report
+      if: always()
+      run: |
+        [ -f gate-report.md ] && cat gate-report.md >> "$GITHUB_STEP_SUMMARY" || echo "No gate report: the run didn't finish." >> "$GITHUB_STEP_SUMMARY"
+    - name: Collect diagnostics
+      if: failure()
+      run: |
+        mkdir -p diag
+        k="kubectl --context kind-safe-ops"
+        $k get pods -A -o wide > diag/pods.txt 2>&1 || true
+        $k get events -A --sort-by=.lastTimestamp > diag/events.txt 2>&1 || true
+        $k get evalrun -n evals -o yaml > diag/evalruns.yaml 2>&1 || true
+        $k logs -n evals -l app=eval-runner --tail=-1 > diag/eval-runner.log 2>&1 || true
+        $k logs -n agent deploy/agent-worker --tail=500 > diag/agent-worker.log 2>&1 || true
+        $k logs -n approval-system deploy/approval-controller --tail=500 > diag/controller.log 2>&1 || true
+        $k logs -n gateways deploy/llm-gateway --tail=500 > diag/llm-gateway.log 2>&1 || true
+    - uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: eval-gate-diagnostics
+        path: diag/
+        retention-days: 14
+
+  # The required check: the gate passed, or didn't need to run.
+  result:
+    needs: [changes, unit, eval-gate]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+    - env:
+        UNIT: ${{ needs.unit.result }}
+        GATE: ${{ needs.eval-gate.result }}
+        RUN: ${{ needs.changes.outputs.run }}
+      run: |
+        echo "unit: $UNIT, eval gate: $GATE (needed: $RUN)"
+        [ "$UNIT" = success ] || exit 1
+        [ "$GATE" = success ] || { [ "$RUN" = false ] && [ "$GATE" = skipped ]; }
