@@ -1,0 +1,215 @@
+# The local model inside the cluster (P5 M2): vLLM on the GPU through the
+# device plugin, as an ordinary restricted pod (no privileges: the GPU comes
+# as a CDI device). Same image, weights, settings and key as the server
+# outside the cluster (scripts/model-server.sh); one runs at a time, since
+# the GPU has 4 GB (scripts/local-model-mode.sh switches).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: inference
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+# The verified weights, copied into the node by scripts/local-model-mode.sh
+# (read-only files). A pre-bound volume, so the pod needs no hostPath.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: local-model-weights
+spec:
+  capacity: {storage: 2Gi}
+  accessModes: [ReadOnlyMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  claimRef: {namespace: inference, name: local-model-weights}
+  hostPath: {path: /var/lib/safe-ops-models/qwen2.5-1.5b-instruct-awq, type: Directory}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: local-model-weights
+  namespace: inference
+spec:
+  accessModes: [ReadOnlyMany]
+  storageClassName: ""
+  volumeName: local-model-weights
+  resources: {requests: {storage: 2Gi}}
+---
+# No replicas field: scripts/local-model-mode.sh owns the count (0 while
+# the server outside the cluster has the GPU), and re-applying this file
+# leaves it alone.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-model
+  namespace: inference
+spec:
+  strategy: {type: Recreate}   # one GPU: the old pod must go first
+  selector:
+    matchLabels: {app: local-model}
+  template:
+    metadata:
+      labels: {app: local-model}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      # Every start re-checks the weights against the lock (P5-08): every
+      # file's hash, no other files, no request for remote code.
+      initContainers:
+      - name: verify-weights
+        image: safe-ops-vllm:0.30.0-cu129
+        imagePullPolicy: Never
+        command:
+        - sh
+        - -c
+        - |
+          set -e
+          cd /models/qwen2.5-1.5b-instruct
+          grep -v '^#' /lock/lock.sha256 | sha256sum --check --strict --quiet
+          [ "$(grep -v '^#' /lock/lock.sha256 | awk '{print $2}' | sort)" = "$(find . -type f -printf '%P\n' | sort)" ] \
+            || { echo "files other than the lock's"; exit 1; }
+          if grep -q '"auto_map"' config.json tokenizer_config.json; then echo "asks for remote code"; exit 1; fi
+          echo "weights verified"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        resources:
+          requests: {cpu: 100m, memory: 64Mi}
+          limits: {cpu: "1", memory: 256Mi}
+        volumeMounts:
+        - {name: weights, mountPath: /models/qwen2.5-1.5b-instruct, readOnly: true}
+        - {name: lock, mountPath: /lock, readOnly: true}
+      containers:
+      - name: vllm
+        image: safe-ops-vllm:0.30.0-cu129
+        imagePullPolicy: Never
+        args:
+        - --model=/models/qwen2.5-1.5b-instruct
+        - --served-model-name=qwen2.5-1.5b-instruct
+        - --load-format=safetensors
+        - --dtype=float16
+        - --gpu-memory-utilization=0.80
+        - --max-model-len=4096
+        - --max-num-seqs=4
+        - --enforce-eager
+        - --enable-auto-tool-choice
+        - --tool-call-parser=hermes
+        - --host=0.0.0.0
+        - --port=8000
+        env:
+        - {name: HOME, value: /tmp}
+        - {name: HF_HUB_OFFLINE, value: "1"}
+        - {name: TRANSFORMERS_OFFLINE, value: "1"}
+        - {name: VLLM_NO_USAGE_STATS, value: "1"}
+        - {name: DO_NOT_TRACK, value: "1"}
+        - name: VLLM_API_KEY
+          valueFrom: {secretKeyRef: {name: local-model-key, key: api-key}}
+        ports:
+        - {name: http, containerPort: 8000}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        resources:
+          requests: {cpu: 500m, memory: 3Gi}
+          limits: {cpu: "4", memory: 6Gi, nvidia.com/gpu: 1}
+        # exec, not httpGet: on this cluster Cilium sees the kubelet's
+        # traffic as world, which the default-deny ingress drops (P1
+        # README finding 6).
+        startupProbe:
+          exec: {command: [python3, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]}
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          exec: {command: [python3, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]}
+          periodSeconds: 10
+          timeoutSeconds: 5
+        volumeMounts:
+        - {name: weights, mountPath: /models/qwen2.5-1.5b-instruct, readOnly: true}
+        - {name: tmp, mountPath: /tmp}
+        - {name: shm, mountPath: /dev/shm}
+      volumes:
+      - name: weights
+        persistentVolumeClaim: {claimName: local-model-weights, readOnly: true}
+      - name: lock
+        configMap: {name: local-model-lock}
+      - name: tmp
+        emptyDir: {sizeLimit: 2Gi}
+      - name: shm
+        emptyDir: {medium: Memory, sizeLimit: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: local-model
+  namespace: inference
+spec:
+  selector: {app: local-model}
+  ports:
+  - {name: http, port: 8000, targetPort: http}
+---
+# The server has no route anywhere, and only the LLM gateway reaches it
+# (P5-07), as outside the cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: inference
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: local-model-from-gateway
+  namespace: inference
+spec:
+  podSelector:
+    matchLabels: {app: local-model}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: gateways}
+      podSelector:
+        matchLabels: {app: llm-gateway}
+    ports:
+    - {port: 8000, protocol: TCP}
+---
+# The gateway's side: resolve the Service's name (through Cilium's DNS
+# proxy) and connect to the pods.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: llm-gateway-to-inference
+  namespace: gateways
+spec:
+  endpointSelector:
+    matchLabels: {app: llm-gateway}
+  egress:
+  - toEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: kube-system
+        k8s:k8s-app: kube-dns
+    toPorts:
+    - ports:
+      - {port: "53", protocol: UDP}
+      - {port: "53", protocol: TCP}
+      rules:
+        dns:
+        - matchName: local-model.inference.svc.cluster.local
+  - toEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: inference
+        app: local-model
+    toPorts:
+    - ports: [{port: "8000", protocol: TCP}]

@@ -31,7 +31,9 @@ fail() { echo "FAIL  $1"; FAILED=1; }
 check() { if grep -qE -- "$2" <<<"$3"; then pass "$1"; else fail "$1: got: ${3:0:300}"; fi; }
 refute() { if grep -qE -- "$2" <<<"$3"; then fail "$1: found: $(grep -oE -- "$2" <<<"$3" | head -3 | tr '\n' ' ')"; else pass "$1"; fi; }
 forward() {
-  kubectl port-forward -n "$1" "$2" "$4:$3" >/dev/null 2>&1 & PFS+=($!)
+  # command: kubectl is a function (lib.sh); backgrounding the function
+  # puts $! on a subshell, and killing that leaves the port-forward running.
+  command kubectl --context "$KUBE_CONTEXT" port-forward -n "$1" "$2" "$4:$3" >/dev/null 2>&1 & PFS+=($!)
   for _ in $(seq 1 30); do (exec 3<>/dev/tcp/127.0.0.1/$4) 2>/dev/null && return 0; sleep 1; done
   echo "port-forward to $2 didn't come up"; exit 1
 }

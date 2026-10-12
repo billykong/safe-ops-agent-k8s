@@ -7,6 +7,7 @@
 #   verify [DIR]  re-check a copy of the weights (default: the served one)
 #   up       verify the weights, then start the server
 #   down     stop it (frees the GPU)
+#   key      create the key and its Secrets, if missing
 #   status
 #
 # The server:
@@ -100,9 +101,14 @@ key() {
     (umask 077; head -c 32 /dev/urandom | base64 | tr -d '=+/\n' > "$KEY_FILE")
   fi
   chmod 600 "$KEY_FILE"
-  # The gateway's copy: mounted by the LLM gateway only (P3 manifests).
-  kubectl -n gateways create secret generic local-model-key --from-file=api-key="$KEY_FILE" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  # The gateway's copy: mounted by the LLM gateway only (P3 manifests);
+  # and the in-cluster server's (P5 M2), if its namespace exists.
+  local ns
+  for ns in gateways inference; do
+    kubectl get namespace $ns >/dev/null 2>&1 || continue
+    kubectl -n $ns create secret generic local-model-key --from-file=api-key="$KEY_FILE" \
+      --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  done
 }
 
 gpu_flags() {
@@ -168,7 +174,8 @@ ready() { docker exec "$NODE" curl -sf -m 3 -o /dev/null "http://$IP:$PORT/healt
 down() { docker rm -f "$NAME" >/dev/null 2>&1 && echo "stopped $NAME" || echo "$NAME isn't running"; }
 
 status() {
-  echo "server: $(docker inspect -f '{{.State.Status}}' "$NAME" 2>/dev/null || echo absent), $(ready && echo ready || echo 'not ready')"
+  local st; st=$(docker inspect -f '{{.State.Status}}' "$NAME" 2>/dev/null | tr -d '\n') || true
+  echo "server: ${st:-absent}, $(ready && echo ready || echo 'not ready')"
   echo "model: $SERVED ($REPO@${REVISION:0:12}) at http://$IP:$PORT"
   nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader 2>/dev/null | sed 's/^/gpu memory: /' || true
 }
@@ -177,7 +184,8 @@ case "${1:-}" in
   fetch) fetch ;;
   verify) verify "${2:-$WEIGHTS}" && echo "verified: ${2:-$WEIGHTS}" ;;
   up) up ;;
+  key) key ;;
   down) down ;;
   status) status ;;
-  *) echo "usage: $0 fetch|verify [DIR]|up|down|status" >&2; exit 2 ;;
+  *) echo "usage: $0 fetch|verify [DIR]|up|down|key|status" >&2; exit 2 ;;
 esac

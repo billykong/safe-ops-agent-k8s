@@ -1,0 +1,22 @@
+# WSL2: NVML is /usr/lib/wsl/lib/libnvidia-ml.so.1, a loader that opens the
+# real driver at /usr/lib/wsl/drivers/<store>/ by absolute path. The plugin
+# looks for NVML only in standard directories under its driver root
+# (go-nvlib), so give it /usr/lib/wsl at its real path and on the library
+# path. The chart has no setting for either.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvdp-nvidia-device-plugin
+  namespace: gpu-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: nvidia-device-plugin-ctr
+        env:
+        - {name: LD_LIBRARY_PATH, value: /usr/lib/wsl/lib}
+        volumeMounts:
+        - {name: wsl-driver, mountPath: /usr/lib/wsl, readOnly: true}
+      volumes:
+      - name: wsl-driver
+        hostPath: {path: /usr/lib/wsl, type: Directory}

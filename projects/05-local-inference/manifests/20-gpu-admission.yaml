@@ -1,0 +1,47 @@
+# Who may get the GPU (P5-09). The device plugin hands out nvidia.com/gpu to
+# any pod that requests it, so admission decides who may ask: pods in
+# namespace inference only. The code sandboxes (namespace sandboxes, gVisor
+# or Kata), the agent and everything else are refused, whatever RBAC lets
+# them create. And no pod may ask containerd for a CDI device by annotation
+# (cdi.k8s.io/...): containerd 2.3 ignores those from pods today (the suite
+# checks), so this holds if that ever changes.
+# A privileged pod sees every device on the node, /dev/dxg included; Pod
+# Security keeps those out of every namespace but gpu-system and kube-system.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gpu-only-for-inference
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: ["v1"]
+      resources: ["pods", "pods/ephemeralcontainers"]
+      operations: ["CREATE", "UPDATE"]
+  variables:
+  - name: containers
+    expression: >-
+      object.spec.containers
+      + (has(object.spec.initContainers) ? object.spec.initContainers : [])
+      + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])
+  - name: wantsGPU
+    expression: >-
+      variables.containers.exists(c, has(c.resources) &&
+        ((has(c.resources.limits) && c.resources.limits.exists(k, k.startsWith('nvidia.com/'))) ||
+         (has(c.resources.requests) && c.resources.requests.exists(k, k.startsWith('nvidia.com/')))))
+  validations:
+  - expression: "!variables.wantsGPU || request.namespace == 'inference'"
+    messageExpression: "'the GPU (nvidia.com/*) is for namespace inference only, not ' + request.namespace"
+  - expression: >-
+      !has(object.metadata.annotations) ||
+      !object.metadata.annotations.exists(k, k.startsWith('cdi.k8s.io/'))
+    message: pods may not request CDI devices by annotation
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gpu-only-for-inference
+spec:
+  policyName: gpu-only-for-inference
+  validationActions: [Deny]

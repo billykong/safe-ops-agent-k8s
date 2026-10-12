@@ -12,7 +12,7 @@ Weaknesses we know about, have reproduced, and haven't closed yet. Each has an I
 | [GAP-06](#gap-06-the-collector-cant-tell-who-sent-a-span) | The collector can't tell who sent a span | Low (traces are a debugging aid; the numbers that matter are scraped from the gateways and controller) | Open | [P4-01](prd/projects/p4-observability-evals.md) |
 | [GAP-07](#gap-07-a-long-audit-sink-outage-loses-events-from-the-sink) | A long audit sink outage loses events from the sink | Low (the node's log keeps them, and the drop alerts) | Open | [P4-04](prd/projects/p4-observability-evals.md) |
 | [GAP-08](#gap-08-the-ci-gate-cant-score-a-prompt-or-model-change) | The CI gate can't score a prompt or model change | Medium (a prompt change needs a deliberate re-baseline, but nothing checks it was tested on the real model) | Open | [P4-13](prd/projects/p4-observability-evals.md) |
-| [GAP-09](#gap-09-the-node-can-reach-the-local-model-server) | The node can reach the local model server | Low (needs root on the node or a host-network pod, and then the key) | Open | [P5-07](prd/projects/p5-local-inference.md) |
+| [GAP-09](#gap-09-the-node-can-reach-the-local-model-server) | The node can reach the local model server (the Docker fallback) | Low (needs root on the node or a host-network pod, and then the key) | Open (Docker server only) | [P5-07](prd/projects/p5-local-inference.md) |
 
 ## GAP-01: domain fronting through the PyPI egress allowlist
 
@@ -273,5 +273,5 @@ Low. A host-network pod needs a namespace whose Pod Security admits it (the agen
 
 ### Status
 
-Open. Revisit with P5 M2: an in-cluster server takes the node out of the path.
+Open, for the Docker server only (P5's fallback). The in-cluster server (P5 M2, the default) doesn't have it: its namespace is default-deny, and on this cluster the node's traffic reaches pods as `world` (P1 README finding 6), so the node's connections are dropped like any other.
 

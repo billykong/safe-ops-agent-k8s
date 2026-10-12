@@ -1,0 +1,18 @@
+# NVIDIA device plugin (chart 0.20.1) on the kind node, under WSL2 (P5-03).
+# No NVIDIA container runtime: the plugin answers an allocation with CDI
+# device names (cdi-cri), and containerd 2.x applies the CDI spec the plugin
+# writes to /var/run/cdi: /dev/dxg, the driver's files from /usr/lib/wsl,
+# and the toolkit's hook to update the container's library cache.
+# scripts/node-gpu.sh puts the driver and the hook in the node first.
+image:
+  repository: nvcr.io/nvidia/k8s-device-plugin
+  tag: v0.20.1@sha256:27c1b2553a690ca3d29889dcd61df97525d46f58272c0be8dc63c2b18f120075
+deviceListStrategy: cdi-cri
+nvidiaDriverRoot: /
+cdi:
+  nvidiaHookPath: /usr/local/nvidia-toolkit/bin/nvidia-cdi-hook
+# NVML opens /dev/dxg, which a container gets only privileged or through
+# CDI; the plugin is what hands out CDI devices, so it's privileged. It
+# runs alone in namespace gpu-system; no workload is (P5-09).
+securityContext:
+  privileged: true

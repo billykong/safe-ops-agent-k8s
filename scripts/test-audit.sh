@@ -44,7 +44,9 @@ ev() { python3 scripts/audit_events.py "$@"; }
 as_agent() { kubectl exec -i -n agent deploy/agent-worker -- python - "$@" < scripts/kube_probe.py; }
 in_agent_connect() { kubectl exec -i -n agent deploy/agent-worker -- python - connect "$@" < scripts/otel_probe.py 2>&1 || true; }
 forward() {
-  kubectl port-forward -n "$1" "$2" "$4:$3" >/dev/null 2>&1 & PFS+=($!)
+  # command: kubectl is a function (lib.sh); backgrounding the function
+  # puts $! on a subshell, and killing that leaves the port-forward running.
+  command kubectl --context "$KUBE_CONTEXT" port-forward -n "$1" "$2" "$4:$3" >/dev/null 2>&1 & PFS+=($!)
   for _ in $(seq 1 30); do (exec 3<>/dev/tcp/127.0.0.1/$4) 2>/dev/null && return 0; sleep 1; done
   echo "port-forward to $2 didn't come up"; exit 1
 }
