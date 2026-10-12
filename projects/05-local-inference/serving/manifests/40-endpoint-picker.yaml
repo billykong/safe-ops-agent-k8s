@@ -1,0 +1,194 @@
+# The InferencePool and its endpoint picker (P5-05, M3): the llm-d Router's
+# EPP (v0.11.0; the full EPP moved there from the Gateway API Inference
+# Extension in GIE v1.6). The gateway's proxy asks it, over ext_proc, which
+# vLLM pod gets each request; it scores the pool's pods on the queue
+# length, KV-cache use and prefix-cache hits it scrapes from their
+# /metrics. Trimmed from the project's chart (llm-d-router-gateway), with
+# the resources sized for this laptop and Pod Security restricted.
+#
+# Membership is a label: any pod in this namespace labelled app=local-model
+# joins the pool and receives prompts. Only the Deployment's pods may wear
+# it (manifests/20-gpu-admission.yaml, pool-membership).
+apiVersion: inference.networking.k8s.io/v1
+kind: InferencePool
+metadata:
+  name: local-model
+  namespace: inference
+spec:
+  selector:
+    matchLabels: {app: local-model}
+  targetPorts:
+  - number: 8000
+  appProtocol: http
+  endpointPickerRef:
+    name: local-model-epp
+    port: {number: 9002}
+    # The picker down: the proxy picks a pod itself. Still a pod of the
+    # pool, so nothing is open that wasn't; only the scoring is lost.
+    failureMode: FailOpen
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: local-model-epp
+  namespace: inference
+---
+# Reads the pool, its pods, and the llm-d request APIs (unused here, but
+# watched).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: local-model-epp
+  namespace: inference
+rules:
+- apiGroups: [inference.networking.k8s.io]
+  resources: [inferencepools]
+  verbs: [get, list, watch]
+- apiGroups: [inference.networking.x-k8s.io, llm-d.ai]
+  resources: [inferenceobjectives, inferencemodelrewrites]
+  verbs: [get, list, watch]
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: local-model-epp
+  namespace: inference
+subjects:
+- {kind: ServiceAccount, name: local-model-epp, namespace: inference}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: local-model-epp}
+---
+# Its /metrics (port 9090) authenticates and authorizes each scrape, as the
+# approval controller's does: Prometheus's token, and its
+# safe-ops-metrics-reader role (P4 manifests).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: local-model-epp-metrics-auth
+rules:
+- apiGroups: [authentication.k8s.io]
+  resources: [tokenreviews]
+  verbs: [create]
+- apiGroups: [authorization.k8s.io]
+  resources: [subjectaccessreviews]
+  verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: local-model-epp-metrics-auth
+subjects:
+- {kind: ServiceAccount, name: local-model-epp, namespace: inference}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: local-model-epp-metrics-auth}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: local-model-epp
+  namespace: inference
+data:
+  # The chart's scorers: queue length and KV-cache use (both scraped from
+  # vLLM), and prefix-cache affinity (from the requests it routed). Its
+  # weights (prefix 3, queue 2, KV 2) kept a second replica idle: requests
+  # sharing a prefix (the agent's and the judge's share their system
+  # prompts) stayed with the pod that had it cached while two waited there
+  # (README, finding 20). Here load comes first: a 14k-token KV cache keeps
+  # little worth reusing. Read at start: scripts/serving-stack.sh restarts
+  # the picker when this changes.
+  plugins.yaml: |
+    apiVersion: llm-d.ai/v1alpha1
+    kind: EndpointPickerConfig
+    plugins:
+    - type: queue-scorer
+    - type: kv-cache-utilization-scorer
+    - type: prefix-cache-scorer
+    - type: metrics-data-source
+      parameters:
+        scheme: http
+        path: /metrics
+    - type: core-metrics-extractor
+    schedulingProfiles:
+    - name: default
+      plugins:
+      - pluginRef: queue-scorer
+        weight: 3
+      - pluginRef: kv-cache-utilization-scorer
+        weight: 2
+      - pluginRef: prefix-cache-scorer
+        weight: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-model-epp
+  namespace: inference
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: local-model-epp}
+  template:
+    metadata:
+      labels: {app: local-model-epp}
+    spec:
+      serviceAccountName: local-model-epp
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: epp
+        image: ghcr.io/llm-d/llm-d-router-endpoint-picker:v0.11.0@sha256:39257d24552d16d8f215d3de25cc734fd44af3b282b67032db01aff900c610cf
+        args:
+        - --pool-name=local-model
+        - --pool-namespace=inference
+        - --pool-group=inference.networking.k8s.io
+        - --config-file=/config/plugins.yaml
+        - --grpc-health-port=9003
+        - --zap-encoder=json
+        - --tracing=false
+        env:
+        - name: NAMESPACE
+          valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+        - name: POD_NAME
+          valueFrom: {fieldRef: {fieldPath: metadata.name}}
+        ports:
+        - {name: grpc, containerPort: 9002}
+        - {name: grpc-health, containerPort: 9003}
+        - {name: metrics, containerPort: 9090}
+        # gRPC probes: the image is distroless, with nothing an exec probe
+        # could run. The kubelet's traffic arrives as world on this cluster
+        # (P1 README finding 6), so 42-networkpolicy.yaml opens port 9003,
+        # and only it, to world (README, finding 17).
+        livenessProbe:
+          grpc: {port: 9003, service: inference-extension}
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          grpc: {port: 9003, service: inference-extension}
+          periodSeconds: 5
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        resources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {cpu: "1", memory: 512Mi}
+        volumeMounts:
+        - {name: config, mountPath: /config, readOnly: true}
+      volumes:
+      - name: config
+        configMap: {name: local-model-epp}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: local-model-epp
+  namespace: inference
+spec:
+  selector: {app: local-model-epp}
+  ports:
+  - {name: grpc-ext-proc, port: 9002, appProtocol: kubernetes.io/h2c}
+  - {name: http-metrics, port: 9090}

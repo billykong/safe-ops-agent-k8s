@@ -1,0 +1,202 @@
+# Who talks to whom in the serving stack (P5-07 still holds: the LLM
+# gateway is the only way in). Namespace inference is default-deny
+# (manifests/30-inference.yaml), and so is agentgateway-system (below).
+#
+#   llm-gateway -> proxy :8080 -> vLLM :8000
+#                  proxy -> EPP :9002 (ext_proc: which pod?)
+#                  proxy -> controller :9978 (xDS: its configuration)
+#   EPP -> vLLM :8000 (/metrics), EPP -> API server (the pool, its pods)
+#   Prometheus -> EPP :9090 (the pool's queue, for KEDA)
+#
+# Health ports only, from the kubelet: on this cluster Cilium sees the
+# node's traffic as world (P1 README finding 6), and these images are
+# distroless, with nothing an exec probe could run. Health ports answer
+# nothing else.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: inference-gateway
+  namespace: inference
+spec:
+  endpointSelector:
+    matchLabels: {gateway.networking.k8s.io/gateway-name: inference-gateway}
+  ingress:
+  - fromEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: gateways, app: llm-gateway}
+    toPorts: [{ports: [{port: "8080", protocol: TCP}]}]
+  - fromEntities: [world, host]
+    toPorts: [{ports: [{port: "15021", protocol: TCP}]}]
+  egress:
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: kube-system, k8s:k8s-app: kube-dns}
+    toPorts:
+    - ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}]
+      rules:
+        dns:
+        - matchName: agentgateway.agentgateway-system.svc.cluster.local
+        - matchName: local-model-epp.inference.svc.cluster.local
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: agentgateway-system, app.kubernetes.io/name: agentgateway}
+    toPorts: [{ports: [{port: "9978", protocol: TCP}]}]
+  - toEndpoints: [{matchLabels: {app: local-model-epp}}]
+    toPorts: [{ports: [{port: "9002", protocol: TCP}]}]
+  - toEndpoints: [{matchLabels: {app: local-model}}]
+    toPorts: [{ports: [{port: "8000", protocol: TCP}]}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: local-model-epp
+  namespace: inference
+spec:
+  endpointSelector:
+    matchLabels: {app: local-model-epp}
+  ingress:
+  - fromEndpoints:
+    - matchLabels: {gateway.networking.k8s.io/gateway-name: inference-gateway}
+    toPorts: [{ports: [{port: "9002", protocol: TCP}]}]
+  - fromEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: observability, app: prometheus}
+    toPorts: [{ports: [{port: "9090", protocol: TCP}]}]
+  - fromEntities: [world, host]
+    toPorts: [{ports: [{port: "9003", protocol: TCP}]}]
+  egress:
+  - toEndpoints: [{matchLabels: {app: local-model}}]
+    toPorts: [{ports: [{port: "8000", protocol: TCP}]}]
+  - toEntities: [kube-apiserver]
+    toPorts: [{ports: [{port: "6443", protocol: TCP}]}]
+---
+# The controller: reads the API server, serves the proxies' xDS. It reaches
+# nothing else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: agentgateway-system
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agentgateway-controller
+  namespace: agentgateway-system
+spec:
+  endpointSelector:
+    matchLabels: {app.kubernetes.io/name: agentgateway}
+  ingress:
+  - fromEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: inference, gateway.networking.k8s.io/gateway-name: inference-gateway}
+    toPorts: [{ports: [{port: "9978", protocol: TCP}]}]
+  - fromEntities: [world, host]
+    toPorts: [{ports: [{port: "9093", protocol: TCP}]}]
+  egress:
+  - toEntities: [kube-apiserver]
+    toPorts: [{ports: [{port: "6443", protocol: TCP}]}]
+---
+# Prometheus's side (namespace observability, P4): scrape the EPP.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: prometheus-to-local-model-epp
+  namespace: observability
+spec:
+  endpointSelector:
+    matchLabels: {app: prometheus}
+  egress:
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: kube-system, k8s:k8s-app: kube-dns}
+    toPorts:
+    - ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}]
+      rules:
+        dns:
+        - matchName: local-model-epp.inference.svc.cluster.local
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: inference, app: local-model-epp}
+    toPorts: [{ports: [{port: "9090", protocol: TCP}]}]
+---
+# KEDA (namespace keda): the operator asks Prometheus and the API server;
+# the metrics server is the API server's (the external metrics API) and
+# asks the operator.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: keda
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: keda-operator
+  namespace: keda
+spec:
+  endpointSelector:
+    matchLabels: {app: keda-operator}
+  ingress:
+  - fromEndpoints: [{matchLabels: {app: keda-operator-metrics-apiserver}}]
+    toPorts: [{ports: [{port: "9666", protocol: TCP}]}]
+  - fromEntities: [world, host]
+    toPorts: [{ports: [{port: "8081", protocol: TCP}]}]
+  egress:
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: kube-system, k8s:k8s-app: kube-dns}
+    toPorts:
+    - ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}]
+      rules:
+        dns:
+        - matchName: prometheus.observability.svc.cluster.local
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: observability, app: prometheus}
+    toPorts: [{ports: [{port: "9090", protocol: TCP}]}]
+  - toEntities: [kube-apiserver]
+    toPorts: [{ports: [{port: "6443", protocol: TCP}]}]
+---
+# The API server calls it from the node: world on this cluster (P1 finding
+# 6), like the kubelet's probes on the same port.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: keda-metrics-apiserver
+  namespace: keda
+spec:
+  endpointSelector:
+    matchLabels: {app: keda-operator-metrics-apiserver}
+  ingress:
+  - fromEntities: [kube-apiserver, world, host]
+    toPorts: [{ports: [{port: "6443", protocol: TCP}]}]
+  egress:
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: kube-system, k8s:k8s-app: kube-dns}
+    toPorts:
+    - ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}]
+      rules:
+        dns:
+        - matchName: keda-operator.keda.svc.cluster.local
+  - toEndpoints: [{matchLabels: {app: keda-operator}}]
+    toPorts: [{ports: [{port: "9666", protocol: TCP}]}]
+  - toEntities: [kube-apiserver]
+    toPorts: [{ports: [{port: "6443", protocol: TCP}]}]
+---
+# Prometheus's side: KEDA's operator may query it (P4's policy lets in only
+# the collector and Grafana).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prometheus-from-keda
+  namespace: observability
+spec:
+  podSelector:
+    matchLabels: {app: prometheus}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: keda}
+      podSelector:
+        matchLabels: {app: keda-operator}
+    ports:
+    - {port: 9090, protocol: TCP}

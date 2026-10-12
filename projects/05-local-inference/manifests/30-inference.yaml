@@ -36,16 +36,17 @@ spec:
   volumeName: local-model-weights
   resources: {requests: {storage: 2Gi}}
 ---
-# No replicas field: scripts/local-model-mode.sh owns the count (0 while
-# the server outside the cluster has the GPU), and re-applying this file
-# leaves it alone.
+# No replicas field: KEDA owns the count, 1 or 2 on queue depth (P5 M3,
+# serving/manifests/43-autoscaling.yaml), and scripts/local-model-mode.sh
+# pauses it at 0 while the server outside the cluster has the GPU.
+# Re-applying this file leaves the count alone.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: local-model
   namespace: inference
 spec:
-  strategy: {type: Recreate}   # one GPU: the old pod must go first
+  strategy: {type: Recreate}   # two GPU slices, maybe both in use: the old pods go first
   selector:
     matchLabels: {app: local-model}
   template:
@@ -95,7 +96,15 @@ spec:
         - --served-model-name=qwen2.5-1.5b-instruct
         - --load-format=safetensors
         - --dtype=float16
-        - --gpu-memory-utilization=0.80
+        # Two replicas share the 4 GB GPU (time-slicing, P5 M3), with a
+        # fixed KV cache each: 400 MiB, 14k tokens. Not sized by vLLM's
+        # startup profiling: that measures the whole GPU, and counted the
+        # other replica's memory, busy under the load that called this one,
+        # as its own (-0.75 GiB available; README, finding 16).
+        # --gpu-memory-utilization then only checks that 0.42 of the GPU is
+        # free at start.
+        - --gpu-memory-utilization=0.42
+        - --kv-cache-memory-bytes=419430400
         - --max-model-len=4096
         - --max-num-seqs=4
         - --enforce-eager
@@ -146,18 +155,10 @@ spec:
       - name: shm
         emptyDir: {medium: Memory, sizeLimit: 1Gi}
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: local-model
-  namespace: inference
-spec:
-  selector: {app: local-model}
-  ports:
-  - {name: http, port: 8000, targetPort: http}
----
-# The server has no route anywhere, and only the LLM gateway reaches it
-# (P5-07), as outside the cluster.
+# The server has no route anywhere. Since M3 its clients are the
+# serving stack's (serving/manifests/): the inference gateway's proxy, which
+# the LLM gateway alone may reach, and the endpoint picker, for /metrics.
+# Its old Service is gone: the pool, not a Service, finds the pods.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -170,7 +171,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: local-model-from-gateway
+  name: local-model-from-serving-stack
   namespace: inference
 spec:
   podSelector:
@@ -178,15 +179,15 @@ spec:
   policyTypes: [Ingress]
   ingress:
   - from:
-    - namespaceSelector:
-        matchLabels: {kubernetes.io/metadata.name: gateways}
-      podSelector:
-        matchLabels: {app: llm-gateway}
+    - podSelector:
+        matchLabels: {gateway.networking.k8s.io/gateway-name: inference-gateway}
+    - podSelector:
+        matchLabels: {app: local-model-epp}
     ports:
     - {port: 8000, protocol: TCP}
 ---
-# The gateway's side: resolve the Service's name (through Cilium's DNS
-# proxy) and connect to the pods.
+# The LLM gateway's side: resolve the inference gateway's name (through
+# Cilium's DNS proxy) and connect to its proxy.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -206,10 +207,10 @@ spec:
       - {port: "53", protocol: TCP}
       rules:
         dns:
-        - matchName: local-model.inference.svc.cluster.local
+        - matchName: inference-gateway.inference.svc.cluster.local
   - toEndpoints:
     - matchLabels:
         k8s:io.kubernetes.pod.namespace: inference
-        app: local-model
+        gateway.networking.k8s.io/gateway-name: inference-gateway
     toPorts:
-    - ports: [{port: "8000", protocol: TCP}]
+    - ports: [{port: "8080", protocol: TCP}]

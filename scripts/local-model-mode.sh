@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Where the local model runs: inside the cluster on the GPU through the
-# device plugin (P5 M2, the default), or outside it in Docker (P5 M1, the
-# fallback). The GPU has 4 GB, so one at a time: this stops one, starts the
-# other and points the LLM gateway's route at it.
+# device plugin, behind the inference gateway and scaled by KEDA (P5 M2
+# and M3, the default), or outside it in Docker (P5 M1, the fallback). The
+# GPU has 4 GB, so one at a time: this stops one, starts the other and
+# points the LLM gateway's route at it.
 #   scripts/local-model-mode.sh cluster|docker|status
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
@@ -12,7 +13,7 @@ LOCK=projects/05-local-inference/models/qwen2.5-1.5b-instruct-awq.sha256
 WEIGHTS=${MODEL_CACHE:-$HOME/.cache/safe-ops-models}/qwen2.5-1.5b-instruct-awq
 NODE=${CLUSTER:-safe-ops}-control-plane
 NODE_WEIGHTS=/var/lib/safe-ops-models/qwen2.5-1.5b-instruct-awq
-CLUSTER_URL=http://local-model.inference.svc.cluster.local:8000
+CLUSTER_URL=http://inference-gateway.inference.svc.cluster.local:8080
 DOCKER_URL=http://172.30.99.10:8000
 
 route() { # URL: the gateway's route for the local model (restarts it)
@@ -45,13 +46,21 @@ case "${1:-status}" in
     node_weights
     kubectl create configmap -n inference local-model-lock --from-file=lock.sha256="$LOCK" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     scripts/model-server.sh key
-    kubectl scale deploy -n inference local-model --replicas=1 >/dev/null
+    # KEDA owns the count (1 or 2): unpause it.
+    kubectl annotate scaledobject -n inference local-model autoscaling.keda.sh/paused-replicas- >/dev/null 2>&1 || true
     echo "waiting for the in-cluster server (a few minutes on a cold start)"
-    kubectl rollout status -n inference deploy/local-model --timeout=600s >/dev/null
+    ready=
+    for _ in $(seq 1 120); do
+      [ "$(kubectl get deploy -n inference local-model -o jsonpath='{.status.readyReplicas}')" -ge 1 ] 2>/dev/null && { ready=1; break; }
+      sleep 5
+    done
+    [ -n "$ready" ] || { echo "the in-cluster server isn't ready after 10 minutes" >&2; exit 1; }
     route "$CLUSTER_URL"
     echo "local model: in the cluster ($CLUSTER_URL)" ;;
   docker)
-    kubectl scale deploy -n inference local-model --replicas=0 >/dev/null 2>&1 || true
+    # Paused at 0, or KEDA would bring it back.
+    kubectl annotate scaledobject -n inference local-model autoscaling.keda.sh/paused-replicas=0 --overwrite >/dev/null
+    for _ in $(seq 1 30); do [ "$(kubectl get deploy -n inference local-model -o jsonpath='{.spec.replicas}')" = 0 ] && break; sleep 2; done
     kubectl wait -n inference --for=delete pod -l app=local-model --timeout=120s >/dev/null 2>&1 || true
     scripts/model-server.sh up
     route "$DOCKER_URL"

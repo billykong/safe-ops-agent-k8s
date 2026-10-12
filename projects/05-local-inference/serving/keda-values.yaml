@@ -1,0 +1,34 @@
+# KEDA (chart 2.21.0): scales vLLM on the pool's queue depth (P5-05, M3;
+# serving/manifests/43-autoscaling.yaml). It asks Prometheus, and serves
+# the number to the HPA it creates through the external metrics API.
+image:
+  keda: {tag: "2.21.0@sha256:81fe6547ce8d1cc29273f887b76507e9b853e5bc1f875ec23fe60061a38ed809"}
+  metricsApiServer: {tag: "2.21.0@sha256:255375037fe592732eeb554743aae360c2da88cf0b9b1258d0a987ef885f0881"}
+  pullPolicy: IfNotPresent
+# ScaledObjects in namespace inference only.
+watchNamespace: inference
+# Scale Deployments and StatefulSets only (built in), not "any resource
+# with a scale subresource" (the default: apiGroups *, resources */scale).
+rbac:
+  enabledCustomScaledRefKinds: false
+# Secrets: its own namespace's only, not the cluster's. The Prometheus
+# trigger here needs none.
+permissions:
+  operator: {restrict: {secret: true}}
+  metricServer: {restrict: {secret: true}}
+# One ScaledObject, written here: the admission webhooks (which catch two
+# scalers on one workload) aren't worth their memory on this laptop.
+webhooks:
+  enabled: false
+# The chart's own Cilium policies let the operator reach every pod in the
+# cluster (toEntities: cluster); serving/manifests/42-networkpolicy.yaml
+# has tighter ones.
+networkPolicy:
+  enabled: false
+resources:
+  operator:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: "1", memory: 384Mi}
+  metricServer:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: "1", memory: 384Mi}

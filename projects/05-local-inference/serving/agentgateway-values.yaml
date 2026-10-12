@@ -1,0 +1,22 @@
+# agentgateway (chart v1.6.0): the Gateway API implementation in front of
+# the InferencePool (P5-05, M3). Its controller watches Gateways and
+# HTTPRoutes and runs a proxy Deployment for each Gateway, in the Gateway's
+# namespace.
+inferenceExtension:
+  enabled: true
+# Write access (Deployments, Services, Secrets, ...) only in namespace
+# inference, where the one Gateway is, instead of in every namespace.
+rbac:
+  gatewayNamespaces: [inference]
+# No Istio here; and no AgentgatewayModel API (unused).
+istio:
+  enabled: false
+agentgatewayModels:
+  enabled: false
+resources:
+  requests: {cpu: 50m, memory: 96Mi}
+  limits: {cpu: "1", memory: 384Mi}
+# Pod Security restricted (namespace agentgateway-system): the chart sets
+# everything but the seccomp profile.
+podSecurityContext:
+  seccompProfile: {type: RuntimeDefault}

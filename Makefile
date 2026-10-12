@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability audit test-audit evals test-evals ci-stack eval-gate test-eval-gate eval-kill-switch test-oversight p5 model-server-down test-local-model test-gpu
+.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability audit test-audit evals test-evals ci-stack eval-gate test-eval-gate eval-kill-switch test-oversight p5 model-server-down test-local-model test-gpu test-serving
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -317,11 +317,13 @@ test-oversight:
 
 # P5: a local model on the GPU, reached through the LLM gateway only. In the
 # cluster (milestone 2): the WSL GPU driver and the CDI hook into the node,
-# the NVIDIA device plugin, then vLLM as a restricted pod in namespace
-# inference. Outside it (milestone 1, the fallback): vLLM in Docker on a
-# network only the node joins. One at a time (4 GB):
-# `scripts/local-model-mode.sh cluster|docker`. model-server-down frees the
-# GPU from the Docker server.
+# the NVIDIA device plugin (time-sliced in two), then vLLM as a restricted
+# pod in namespace inference. Behind it (milestone 3): the serving stack,
+# an InferencePool with llm-d's endpoint picker behind an agentgateway
+# Gateway, and KEDA scaling vLLM from 1 to 2 on queue depth. Outside the
+# cluster (milestone 1, the fallback): vLLM in Docker on a network only the
+# node joins. One at a time (4 GB): `scripts/local-model-mode.sh
+# cluster|docker`. model-server-down frees the GPU from the Docker server.
 P5 := projects/05-local-inference
 
 p5:
@@ -336,6 +338,11 @@ p5:
 	docker exec $(CLUSTER)-control-plane crictl inspecti safe-ops-vllm:0.30.0-cu129 >/dev/null 2>&1 || \
 	  kind load docker-image safe-ops-vllm:0.30.0-cu129 --name $(CLUSTER)
 	$(KUBECTL) apply -f $(P5)/manifests/
+	# Milestone 3 replaced the server's Service with the pool, and the
+	# gateway's way in with the inference gateway's.
+	$(KUBECTL) -n inference delete service local-model --ignore-not-found
+	$(KUBECTL) -n inference delete networkpolicy local-model-from-gateway --ignore-not-found
+	./scripts/serving-stack.sh
 	# The gateway mounts the server's key (Secret local-model-key, optional).
 	./scripts/model-server.sh key
 	$(KUBECTL) -n gateways rollout restart deploy/llm-gateway
@@ -350,3 +357,6 @@ test-local-model:
 
 test-gpu:
 	./scripts/test-gpu.sh
+
+test-serving:
+	./scripts/test-serving.sh

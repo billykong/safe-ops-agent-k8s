@@ -4,6 +4,10 @@
       "image": "docker.io/library/approval-agent:dev",
       "imageID": "docker.io/library/import-2026-10-11@sha256:095626c9d3d58387c1a5bcca239e1ccba483337b92bf02e96a51f2892f4a3606"
     },
+    "agentgateway-system/agentgateway": {
+      "image": "cr.agentgateway.dev/controller:v1.6.0",
+      "imageID": "cr.agentgateway.dev/controller@sha256:d84259a7e2d87f8f39bae385d4b032d823c0a4450aecb32e0e31e2258449645b"
+    },
     "approval-system/approval-controller": {
       "image": "docker.io/library/approval-controller:dev",
       "imageID": "docker.io/library/import-2026-10-11@sha256:f26572b196d321948b3645dcd7ba54db0e93a6965f9f6ea527ef1435335b2d6a"
@@ -21,12 +25,28 @@
       "imageID": "sha256:00840adc1c42c955396518122a26a95b1ca3a12a47a6616d3f6c5cced7bbfdce"
     },
     "gpu-system/nvidia-device-plugin": {
-      "image": "sha256:fd1fb5fa1a7f78f1181f50145655e6f9d675e123438cf08493edc9c7fe052659",
+      "image": "nvcr.io/nvidia/k8s-device-plugin:v0.20.1@sha256:27c1b2553a690ca3d29889dcd61df97525d46f58272c0be8dc63c2b18f120075",
       "imageID": "nvcr.io/nvidia/k8s-device-plugin@sha256:27c1b2553a690ca3d29889dcd61df97525d46f58272c0be8dc63c2b18f120075"
+    },
+    "inference/inference-gateway": {
+      "image": "cr.agentgateway.dev/agentgateway:v1.6.0@sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c",
+      "imageID": "cr.agentgateway.dev/agentgateway@sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c"
     },
     "inference/local-model": {
       "image": "docker.io/library/safe-ops-vllm:0.30.0-cu129",
       "imageID": "docker.io/library/import-2026-10-12@sha256:a7589035f6eb74ddef7867b3059938d8c902daecbe603a98f6ecfd7b0cff6d62"
+    },
+    "inference/local-model-epp": {
+      "image": "ghcr.io/llm-d/llm-d-router-endpoint-picker:v0.11.0@sha256:39257d24552d16d8f215d3de25cc734fd44af3b282b67032db01aff900c610cf",
+      "imageID": "ghcr.io/llm-d/llm-d-router-endpoint-picker@sha256:39257d24552d16d8f215d3de25cc734fd44af3b282b67032db01aff900c610cf"
+    },
+    "keda/keda-operator": {
+      "image": "ghcr.io/kedacore/keda:2.21.0@sha256:81fe6547ce8d1cc29273f887b76507e9b853e5bc1f875ec23fe60061a38ed809",
+      "imageID": "ghcr.io/kedacore/keda@sha256:81fe6547ce8d1cc29273f887b76507e9b853e5bc1f875ec23fe60061a38ed809"
+    },
+    "keda/keda-operator-metrics-apiserver": {
+      "image": "ghcr.io/kedacore/keda-metrics-apiserver:2.21.0@sha256:255375037fe592732eeb554743aae360c2da88cf0b9b1258d0a987ef885f0881",
+      "imageID": "ghcr.io/kedacore/keda-metrics-apiserver@sha256:255375037fe592732eeb554743aae360c2da88cf0b9b1258d0a987ef885f0881"
     },
     "mcp-servers/incident-tracker": {
       "image": "docker.io/library/mcp-tools:dev",
@@ -45,7 +65,7 @@
       "imageID": "sha256:e1534f2d0aa0ce2d79375ce20ac15a3405fc51c3e7bd374f4ac204bc94e1252c"
     }
   },
-  "generated": "2026-10-12T10:17:16Z",
+  "generated": "2026-10-12T22:41:08Z",
   "mcpGrants": {
     "system:serviceaccount:agent:proposer": {
       "incidents": [
@@ -87,9 +107,9 @@
         "repo": "Qwen/Qwen2.5-1.5B-Instruct-AWQ",
         "revision": "3ecffa0ceb27851800f45519bab9c457a04405e1",
         "server": {
-          "inCluster": "local-model.inference"
+          "inCluster": "inference-gateway.inference"
         },
-        "url": "http://local-model.inference.svc.cluster.local:8000"
+        "url": "http://inference-gateway.inference.svc.cluster.local:8080"
       }
     }
   },

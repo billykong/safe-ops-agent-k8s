@@ -50,7 +50,7 @@ server = (json.load(open(f"{tmp}/model-server.json")) or [None])[0]
 self_hosted = {}
 for entry in filter(None, (lenv.get("ROUTES") or "").split(",")):
     model, url = entry.split("=", 1)
-    if ".svc.cluster.local" in url:  # in the cluster (P5 M2): the pod's image is under components
+    if ".svc.cluster.local" in url:  # in the cluster (P5 M2, behind the inference gateway since M3): images under components
         srv = {"inCluster": url.split("//")[1].split(".svc")[0]}
     else:                             # the Docker server outside the cluster (P5 M1)
         srv = {"image": server["Config"]["Image"], "imageID": server["Image"], "args": server["Args"]} if server else "not running"
@@ -60,13 +60,16 @@ running = {}
 for p in json.load(open(f"{tmp}/pods.json"))["items"]:
     app = p["metadata"].get("labels", {}).get("app")
     ns = p["metadata"]["namespace"]
-    if ns not in ("agent", "gateways", "mcp-servers", "approval-system", "temporal", "inference", "gpu-system"):
+    if ns not in ("agent", "gateways", "mcp-servers", "approval-system", "temporal", "inference", "gpu-system", "agentgateway-system", "keda"):
         continue
     app = app or p["metadata"].get("labels", {}).get("app.kubernetes.io/name")
     if not app:
         continue
+    spec = {c["name"]: c["image"] for c in p["spec"]["containers"]}
     for c in p.get("status", {}).get("containerStatuses", []):
-        running.setdefault(f"{ns}/{app}", {"image": c["image"], "imageID": c["imageID"]})
+        # An image pulled by digest is reported by its config's digest: name it as the spec does.
+        image = c["image"] if not c["image"].startswith("sha256:") else spec.get(c["name"], c["image"])
+        running.setdefault(f"{ns}/{app}", {"image": image, "imageID": c["imageID"]})
 
 bom = {
     "generated": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

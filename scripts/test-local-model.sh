@@ -225,6 +225,9 @@ ev1=$(metric "safeops_llm_requests_total{identity=system:serviceaccount:evals:ev
 [ "$((ev1 - ev0))" -ge "${n:-1}" ] && pass "... through the gateway, as the evaluator ($((ev1 - ev0)) requests)" || fail "evaluator requests: $ev0 -> $ev1"
 
 echo "=== With the server down"
+# A fresh token: the agent's lives an hour, and the eval run above can take
+# most of it.
+TOK=$(kubectl exec -n agent "$W" -- cat /var/run/secrets/safe-ops.io/llm-gateway/token)
 scripts/model-server.sh down >/dev/null
 out=$(msg "$(req $MODEL 'hello')")
 check "the local model's requests fail closed: 503 model_unavailable" '^503 .*model_unavailable' "$out"

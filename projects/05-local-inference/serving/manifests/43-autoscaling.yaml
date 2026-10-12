@@ -1,0 +1,51 @@
+# Autoscaling on queue depth (P5-05, M3): KEDA scales vLLM between 1 and 2
+# replicas (the GPU's two time slices) when requests queue in the pool.
+# The numbers come from the endpoint picker, which scrapes every vLLM pod;
+# KEDA asks Prometheus, and the HPA it creates divides by the target.
+#
+# The metric is the pool's requests in flight (running + waiting), with a
+# target of 4 per replica, vLLM's batch (--max-num-seqs): a fifth request
+# queues, and asks for a second replica. Not the queue alone: two replicas
+# drain the queue that called them, and a queue-only target then scales
+# back to one, which queues again (README, finding 15).
+#
+# A new replica takes 3 to 6 minutes to be ready (the weights verified,
+# then loaded and repacked on a GPU the other replica is busy on), and
+# slows that one while it loads (README, finding 21): this is for
+# sustained load, not a burst.
+#
+# scripts/local-model-mode.sh docker pauses this at 0 replicas (the server
+# outside the cluster has the GPU), and cluster unpauses it.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: local-model
+  namespace: inference
+spec:
+  scaleTargetRef:
+    name: local-model
+  minReplicaCount: 1
+  maxReplicaCount: 2
+  pollingInterval: 15
+  # Prometheus down or the query failing: one replica, not a guess.
+  fallback:
+    failureThreshold: 4
+    replicas: 1
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+        # Down after two quiet minutes (the default is five).
+        scaleDown:
+          stabilizationWindowSeconds: 120
+  triggers:
+  - type: prometheus
+    metricType: AverageValue
+    metadata:
+      serverAddress: http://prometheus.observability.svc.cluster.local:9090
+      query: >-
+        sum((llm_d_epp_average_queue_size{name="local-model"} + on(name) llm_d_epp_average_running_requests{name="local-model"})
+        * on(name) llm_d_epp_ready_endpoints{name="local-model"})
+      threshold: "4"
+      ignoreNullValues: "true"

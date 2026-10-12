@@ -59,8 +59,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 ### P5: local inference
 1. **Done.** Model serving outside the cluster as a fallback: vLLM in Docker on the host's GPU, on a network only the cluster's node joins, reached through the LLM gateway only, with hash-verified safetensors weights; used as an eval judge (`make p5 test-local-model`).
 2. **Done.** In-cluster GPU via the device plugin: on kind under WSL2, through CDI (no k3s, no bare metal). vLLM runs as a restricted pod in namespace `inference`; only that namespace may ask for the GPU; the Docker server is the fallback (`make p5 test-gpu`, `scripts/local-model-mode.sh`).
-3. **Next.** Serving stack behind the Gateway API Inference Extension (or KServe/llm-d); autoscaling on queue depth.
-4. GPU metrics.
+3. **Done.** Serving stack behind the Gateway API Inference Extension: an InferencePool with llm-d's endpoint picker, behind an agentgateway Gateway that only the LLM gateway may reach. KEDA scales vLLM from 1 to 2 replicas on the GPU's two time slices when requests queue (`make p5 test-serving`).
+4. **Next.** GPU metrics.
 
 ## Deliverables
 

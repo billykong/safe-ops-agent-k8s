@@ -53,10 +53,11 @@ spec:
         - {name: UPSTREAM_TIMEOUT, value: 60s}
         - {name: API_KEY_FILE, value: /var/run/secrets/safe-ops.io/upstream/api-key}
         # The local model (P5), with its own key: vLLM in the cluster on the
-        # GPU (M2), or outside it in Docker (M1: http://172.30.99.10:8000);
-        # scripts/local-model-mode.sh switches. Without the server its
-        # requests get 503 model_unavailable; the others are unaffected.
-        - {name: ROUTES, value: "qwen2.5-1.5b-instruct=http://local-model.inference.svc.cluster.local:8000"}
+        # GPU, behind the inference gateway (M2, M3), or outside it in Docker
+        # (M1: http://172.30.99.10:8000); scripts/local-model-mode.sh
+        # switches. Without the server its requests get 503
+        # model_unavailable; the others are unaffected.
+        - {name: ROUTES, value: "qwen2.5-1.5b-instruct=http://inference-gateway.inference.svc.cluster.local:8080"}
         - {name: ROUTE_PROVIDER, value: vllm}
         - {name: ROUTE_KEY_FILE, value: /var/run/secrets/safe-ops.io/local-model/api-key}
         # Cost estimate (P4-02): USD per million input:output tokens, cache

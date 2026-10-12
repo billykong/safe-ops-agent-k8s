@@ -16,3 +16,21 @@ cdi:
 # runs alone in namespace gpu-system; no workload is (P5-09).
 securityContext:
   privileged: true
+# Time-slicing (P5-04, M3): the one GPU is advertised as two
+# nvidia.com/gpu, so the serving stack can scale vLLM to a second replica
+# on queue depth (two fit at --gpu-memory-utilization 0.42: 3 GB of the
+# 4). No memory or fault isolation between the two: a slice is a share of
+# time, not of memory. Admission still lets only namespace inference ask
+# for one (manifests/20-gpu-admission.yaml), so the sharers are the same
+# server.
+config:
+  map:
+    default: |-
+      version: v1
+      sharing:
+        timeSlicing:
+          failRequestsGreaterThanOne: true
+          resources:
+          - name: nvidia.com/gpu
+            replicas: 2
+  default: default
