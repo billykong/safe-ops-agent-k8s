@@ -8,8 +8,8 @@ Requirements and status: [docs/prd/projects/p5-local-inference.md](../../docs/pr
 ## Milestones
 1. [x] Model serving outside the cluster (Docker, the host's GPU) as a fallback, called from the cluster through the LLM gateway only. `make p5 test-local-model`: 45 checks, 1 known gap ([GAP-09](../../docs/known-gaps.md#gap-09-the-node-can-reach-the-local-model-server))
 2. [x] In-cluster GPU via the device plugin: works on kind under WSL2, with no k3s or bare metal. vLLM runs as a restricted pod; the Docker server stays as the fallback. `make p5 test-gpu`: 37 checks
-3. [x] Serving stack behind the Gateway API Inference Extension: an InferencePool with llm-d's endpoint picker, behind an agentgateway Gateway; KEDA scales vLLM from 1 to 2 replicas on the GPU's two time slices when requests queue. `make p5 test-serving`: 32 checks, 1 known gap ([GAP-10](../../docs/known-gaps.md#gap-10-the-agentgateway-controller-reads-every-secret))
-4. [ ] GPU metrics
+3. [x] Serving stack behind the Gateway API Inference Extension: an InferencePool with llm-d's endpoint picker, behind an agentgateway Gateway; KEDA scales vLLM from 1 to 2 replicas on two time slices of the GPU when requests queue. `make p5 test-serving`: 32 checks, 1 known gap ([GAP-10](../../docs/known-gaps.md#gap-10-the-agentgateway-controller-reads-every-secret))
+4. [x] GPU metrics: NVIDIA's DCGM exporter as a restricted pod on a third time slice, scraped by Prometheus, with alerts and a Grafana dashboard. DCGM works on this card under WSL2, so the `nvidia-smi` fallback wasn't needed. `make p5 test-gpu-metrics`: 32 checks
 
 ## How it works
 
@@ -48,7 +48,7 @@ flowchart LR
 
 **The device plugin, in CDI mode.** `scripts/device-plugin.sh` renders NVIDIA's chart (0.20.1, image pinned by digest) with [device-plugin/values.yaml](device-plugin/values.yaml) and applies it with one patch ([device-plugin/kustomize-patch.yaml](device-plugin/kustomize-patch.yaml)). With `deviceListStrategy: cdi-cri` the plugin answers an allocation with a CDI device name, and containerd 2.3 (CDI on by default) applies the spec the plugin wrote to `/var/run/cdi`: `/dev/dxg`, the driver's files, and the hook that updates the container's library cache. No NVIDIA container runtime, and nothing installed on the WSL host. The plugin runs privileged, alone in namespace `gpu-system` (Pod Security `privileged`): NVML opens `/dev/dxg`, which a container gets only privileged or through CDI, and the plugin is what hands out CDI devices.
 
-**vLLM as an ordinary pod.** [manifests/30-inference.yaml](manifests/30-inference.yaml): namespace `inference`, Pod Security `restricted`. The pod asks for `nvidia.com/gpu: 1` and gets the GPU without privileges, capabilities or a host path. The weights are a pre-bound read-only volume of the verified copy in the node; an init container checks them against the lock before every start (every hash, no other files, no `auto_map`) and stops the pod if they don't match. Probes are `exec`: on this cluster the kubelet's traffic reaches pods as `world`, which default-deny ingress drops (P1 README finding 6). Since milestone 3 the plugin time-slices the GPU in two (`nvidia.com/gpu: 2`), for a second replica; a third claim waits `Pending`.
+**vLLM as an ordinary pod.** [manifests/30-inference.yaml](manifests/30-inference.yaml): namespace `inference`, Pod Security `restricted`. The pod asks for `nvidia.com/gpu: 1` and gets the GPU without privileges, capabilities or a host path. The weights are a pre-bound read-only volume of the verified copy in the node; an init container checks them against the lock before every start (every hash, no other files, no `auto_map`) and stops the pod if they don't match. Probes are `exec`: on this cluster the kubelet's traffic reaches pods as `world`, which default-deny ingress drops (P1 README finding 6). Since milestone 3 the plugin time-slices the GPU, for a second replica; since milestone 4 in three (`nvidia.com/gpu: 3`), the third for the metrics exporter; a fourth claim waits `Pending`.
 
 **Who may get the GPU (P5-09).** The device plugin gives `nvidia.com/gpu` to any pod that asks; admission decides who may ask. [manifests/20-gpu-admission.yaml](manifests/20-gpu-admission.yaml) refuses a pod requesting any `nvidia.com/*` resource outside namespace `inference`: the code sandboxes (gVisor or Kata, namespace `sandboxes`) can't get it whatever RBAC allows. It also refuses `cdi.k8s.io/` pod annotations. containerd 2.3 ignores those from pods today (the suite removes the policy and checks), so that rule holds if that changes. A privileged pod sees every device on the node; Pod Security keeps those to `gpu-system` and `kube-system`.
 
@@ -98,7 +98,7 @@ The LLM gateway stays the one way in: identity, budgets, policy and audit are st
 - **llm-d Router v0.11.0:** the endpoint picker. The proxy asks it, over Envoy's `ext_proc`, which pod gets each request. It scores the pool's pods on queue length and KV-cache use (scraped from each pod's `/metrics`) and on prefix-cache hits (from what it routed): the chart's scorers, reweighted to put load first (finding 20). Trimmed from its chart, sized for this laptop (the chart asks for 8 CPUs and 8 GiB), restricted. `failureMode: FailOpen`: with the picker down the proxy picks a pod of the pool itself; nothing opens, only the scoring is lost.
 - **agentgateway v1.6.0:** the Gateway API implementation, GIE's own quickstart choice. Its controller (`agentgateway-system`) turns the `Gateway` and `HTTPRoute` in [serving/manifests/41-gateway.yaml](serving/manifests/41-gateway.yaml) into a proxy Deployment in `inference`, configured over xDS. The route sends `/v1/` to the pool.
 
-**Autoscaling on queue depth.** The device plugin advertises the GPU as two time slices ([device-plugin/values.yaml](device-plugin/values.yaml)), and two vLLM replicas fit in 4 GB with a fixed 400 MiB KV cache each (14.6k tokens; finding 16). KEDA 2.21.0 ([serving/keda-values.yaml](serving/keda-values.yaml), [serving/manifests/43-autoscaling.yaml](serving/manifests/43-autoscaling.yaml)) asks Prometheus for the pool's requests in flight (running plus waiting), from the picker's metrics, and the HPA it creates targets 4 per replica, vLLM's batch (`--max-num-seqs`): a fifth concurrent request queues and asks for the second replica. Not the queue alone: that oscillates (finding 15). Down to one after two quiet minutes. A second replica is ready 3 to 6 minutes after it's asked for, so this is for sustained load: under load the second replica doubled throughput, and the picker sent it requests as soon as it was ready. While it loads, it slows the one serving (finding 21). `scripts/local-model-mode.sh docker` pauses KEDA at zero (otherwise it would scale the server back up while the Docker one holds the GPU), and `cluster` unpauses it.
+**Autoscaling on queue depth.** The device plugin advertises the GPU as time slices, two of them for vLLM ([device-plugin/values.yaml](device-plugin/values.yaml)), and two vLLM replicas fit in 4 GB with a fixed 400 MiB KV cache each (14.6k tokens; finding 16). KEDA 2.21.0 ([serving/keda-values.yaml](serving/keda-values.yaml), [serving/manifests/43-autoscaling.yaml](serving/manifests/43-autoscaling.yaml)) asks Prometheus for the pool's requests in flight (running plus waiting), from the picker's metrics, and the HPA it creates targets 4 per replica, vLLM's batch (`--max-num-seqs`): a fifth concurrent request queues and asks for the second replica. Not the queue alone: that oscillates (finding 15). Down to one after two quiet minutes. A second replica is ready 3 to 6 minutes after it's asked for, so this is for sustained load: under load the second replica doubled throughput, and the picker sent it requests as soon as it was ready. While it loads, it slows the one serving (finding 21). `scripts/local-model-mode.sh docker` pauses KEDA at zero (otherwise it would scale the server back up while the Docker one holds the GPU), and `cluster` unpauses it.
 
 **Who may reach what (P5-07).** [serving/manifests/42-networkpolicy.yaml](serving/manifests/42-networkpolicy.yaml), with namespace `inference` default-deny:
 - the LLM gateway may reach the proxy on 8080, and nothing in `inference` but it;
@@ -114,6 +114,27 @@ The kubelet's probes and the API server's calls to KEDA's metrics server arrive 
 **Least privilege for the add-ons.** Their defaults were wide (finding 14):
 - *agentgateway:* writes (Deployments, Services, Secrets) only in `inference` (`rbac.gatewayNamespaces`), and its Gateway's Service is a ClusterIP. Its default is a LoadBalancer, which on kind is also a NodePort on the node: reachable from the host and from every container on Docker's `kind` network, the `ml` cluster's among them, past the LLM gateway. It still reads every Secret in the cluster ([GAP-10](../../docs/known-gaps.md#gap-10-the-agentgateway-controller-reads-every-secret)).
 - *KEDA:* watches `inference` only, reads Secrets in its own namespace only, and scales Deployments and StatefulSets only, not any resource with a scale subresource. Its admission webhooks are off (one ScaledObject, written here; not worth their memory). The chart's own Cilium policies (egress to every pod in the cluster) are replaced by tighter ones.
+
+### GPU metrics (milestone 4)
+
+[manifests/40-gpu-metrics.yaml](manifests/40-gpu-metrics.yaml): NVIDIA's DCGM exporter 4.8.4 (distroless, pinned by digest) as a Deployment in `inference`. Prometheus scrapes it (job `gpu`), four alerts watch it, and a Grafana dashboard (`local-inference`, [dashboards/local-inference.json](../04-observability/dashboards/local-inference.json)) puts it beside the pool's metrics and the LLM gateway's numbers for the local model.
+
+- **DCGM works here.** The milestone allowed for an `nvidia-smi` fallback in case DCGM didn't support the card under WSL2. It does, with the device's counters: utilization, memory, clocks, temperature, power and energy. The profiling (DCP) counters, XID errors, NVLink and row remapping aren't reported on this GeForce card and WSL driver (finding 22). The exporter's counter list ([the ConfigMap](manifests/40-gpu-metrics.yaml)) is what it reports, so nothing is silently missing; the suite checks all 13 arrive.
+- **The GPU, the same way vLLM gets it.** A container sees `/dev/dxg` only privileged or through the device plugin's CDI devices. So the exporter asks for `nvidia.com/gpu: 1` like vLLM, and the plugin now advertises three time slices: two for vLLM (KEDA's maximum), one for the exporter, which takes no GPU memory. No privilege, no host path, no API token, Pod Security `restricted` (finding 23). It needs about 400 MiB of host memory (finding 24).
+- **Whole-GPU numbers, not per pod.** DCGM's pod mapping reads the kubelet's pod-resources socket, a host path; under time-slicing both replicas share the one device anyway, and the WSL driver lists no processes. Per replica, the picker's metrics (vLLM's queue and KV cache) say what each is doing.
+- **Only Prometheus reaches it**, on 9400; it reaches nothing (namespace `inference` is default-deny; DCGM runs inside the exporter). Its label joins the reserved ones ([serving/manifests/44-pool-admission.yaml](serving/manifests/44-pool-admission.yaml)): a pod wearing `app=gpu-metrics` would sit behind the Service Prometheus scrapes and could feed it made-up numbers. No probes, since the kubelet's arrive as `world` and the health endpoint shares the metrics port; `up{job="gpu"}` and the `GPUMetricsDown` alert watch it instead.
+- **It measures the GPU, whoever holds it.** With the Docker server in use (`scripts/local-model-mode.sh docker`), no vLLM pod runs in the cluster and the exporter still reports the device: its memory figure is then the Docker server's (3.2 GB), and agrees with `nvidia-smi` on the host.
+
+Alerts (tickets, not pages: the local model is a judge and a fallback, not the agent's model), in [P4's Prometheus rules](../04-observability/manifests/30-prometheus.yaml):
+
+| Alert | When |
+| --- | --- |
+| `GPUMetricsDown` | The exporter is down for 5 minutes while the serving stack is up |
+| `GPUMemoryNearlyFull` | Over 90% of GPU memory used for 10 minutes. vLLM's KV cache is fixed, so a climb is something else, Windows included |
+| `GPUHot` | Above 85C for 5 minutes: a laptop part, it throttles in the high 80s |
+| `LocalModelAtCapacity` | GPU over 90% busy for 10 minutes, both replicas up, and requests still waiting: KEDA has nothing left to add |
+
+Measured through the suite's load (three concurrent requests through the LLM gateway, below KEDA's target, so one replica): GPU utilization peaked at 42% in 10-second samples, power went from 6 W idle to 24.5 W, temperature rose to 63C, and the SM clock to 1980 MHz. One replica running three sequences at a time leaves most of the GPU idle.
 
 ### Outside the cluster (milestone 1, the fallback)
 
@@ -203,10 +224,15 @@ flowchart LR
     - The suite allows 503s only from KEDA's ask until a minute after the new replica is ready, and reports how many.
     - Ways out: a GPU large enough that the replicas don't share one (MIG, or a second card), a longer upstream timeout for the local model, or a replica kept warm instead of scaled from one.
 
+22. **DCGM runs on a GeForce card under WSL2.** The roadmap expected to need the `nvidia-smi` fallback here. NVIDIA's DCGM exporter 4.8 initialized DCGM and NVML through `/dev/dxg` and the WSL driver, unprivileged, and reports the device's counters: utilization, memory, clocks, temperature, power, energy. Not the profiling ones (`Profiling is not supported for this group of GPUs`: tensor and DRAM activity, PCIe throughput), and no XID errors, NVLink or row remapping. Its memory figures match `nvidia-smi` on the host to the MiB.
+23. **A metrics exporter needs the GPU too, and Kubernetes has one way to give it.** Without a GPU resource the container has no `/dev/dxg`; the alternatives are privileged (as the device plugin is), or a CDI annotation, which containerd ignores and admission refuses (finding 10). So the exporter takes a time slice like vLLM: the plugin advertises three, and the slices are scheduling tokens, not capacity. The cost is accounting: a slice the exporter holds is one vLLM can't, so the count is KEDA's maximum plus one.
+24. **The exporter takes about 400 MiB of host memory.** Most of it is the driver's and DCGM's libraries, mapped at start: a 256 MiB limit was OOM-killed before it served anything. The older image (4.8.1) also announced `/debug/pprof/` on the metrics port; 4.8.4 serves it only with `--enable-pprof`.
+
 ## Run
 
 ```bash
 make p5                  # driver and hook into the node, device plugin, vLLM in the cluster, the serving stack, gateway route
+make test-gpu-metrics    # milestone 4's checks (~6 minutes: load, then Docker and back)
 make test-serving        # milestone 3's checks (~15 minutes: scales to two replicas and back; ~50k of the agent's tokens)
 make test-gpu            # milestone 2's checks (~15 minutes: it switches to Docker and back)
 make test-local-model    # milestone 1's checks, on the Docker server (switches there and back; ~20 minutes)
@@ -226,13 +252,15 @@ The first `make p5` loads the 15 GB server image into the node: 35 minutes. In c
 | `manifests/10-networkpolicy.yaml` | The Docker server: the gateway's egress to it; the clusterwide deny for every other pod |
 | `manifests/20-gpu-admission.yaml` | Only namespace `inference` may ask for the GPU; no CDI annotations |
 | `manifests/30-inference.yaml` | vLLM in the cluster: namespace, weights volume, Deployment, network policies |
-| `device-plugin/` | The NVIDIA device plugin's values (CDI, two time slices) and its WSL2 patch |
+| `manifests/40-gpu-metrics.yaml` | The DCGM exporter: counters, Deployment, Service, network policies |
+| `device-plugin/` | The NVIDIA device plugin's values (CDI, three time slices) and its WSL2 patch |
 | `serving/agentgateway-values.yaml`, `serving/keda-values.yaml` | The charts' values: agentgateway and KEDA, scoped down |
 | `serving/manifests/40-endpoint-picker.yaml` | The InferencePool and llm-d's endpoint picker |
 | `serving/manifests/41-gateway.yaml` | The Gateway (agentgateway), its proxy's parameters, the route to the pool |
 | `serving/manifests/42-networkpolicy.yaml` | Who reaches what: proxy, picker, controller, KEDA, Prometheus |
 | `serving/manifests/43-autoscaling.yaml` | KEDA's ScaledObject: 1 to 2 replicas on requests in flight |
-| `serving/manifests/44-pool-admission.yaml` | Only the Deployments' pods may wear the pool's and the proxy's labels |
+| `serving/manifests/44-pool-admission.yaml` | Only the Deployments' pods may wear the pool's, the proxy's and the exporter's labels |
+| `../04-observability/dashboards/local-inference.json` | Grafana: the GPU, the pool, the local model at the gateway |
 | `../../scripts/serving-stack.sh` | Install the stack: CRDs, agentgateway, KEDA, the manifests |
 | `../../scripts/node-gpu.sh` | The WSL driver, the CDI hook and the label into the node |
 | `../../scripts/device-plugin.sh` | Render, patch and apply the device plugin |

@@ -3,8 +3,10 @@
 # the endpoint picker by theirs: a hand-made pod in namespace inference
 # wearing one would receive prompts, or reach vLLM. So those labels are for
 # pods the ReplicaSet controller makes, from the Deployments here; a pod
-# created by anyone else, or relabelled later, is refused. Who may change
-# the Deployments is RBAC's to decide (cluster admins).
+# created by anyone else, or relabelled later, is refused. The GPU metrics
+# exporter's label too (app=gpu-metrics, M4): it puts a pod behind the
+# Service Prometheus scrapes. Who may change the Deployments is RBAC's to
+# decide (cluster admins).
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -26,18 +28,18 @@ spec:
     expression: >-
       has(object.metadata.labels) && (
         object.metadata.labels.exists(k, k == 'gateway.networking.k8s.io/gateway-name') ||
-        (has(object.metadata.labels.app) && object.metadata.labels.app in ['local-model', 'local-model-epp']))
+        (has(object.metadata.labels.app) && object.metadata.labels.app in ['local-model', 'local-model-epp', 'gpu-metrics']))
   - name: wore
     expression: >-
       oldObject != null && has(oldObject.metadata.labels) && (
         oldObject.metadata.labels.exists(k, k == 'gateway.networking.k8s.io/gateway-name') ||
-        (has(oldObject.metadata.labels.app) && oldObject.metadata.labels.app in ['local-model', 'local-model-epp']))
+        (has(oldObject.metadata.labels.app) && oldObject.metadata.labels.app in ['local-model', 'local-model-epp', 'gpu-metrics']))
   validations:
   - expression: >-
       request.operation != 'CREATE' || !variables.wears ||
       request.userInfo.username == 'system:serviceaccount:kube-system:replicaset-controller'
     messageExpression: >-
-      'the serving stack\'s labels (app=local-model, app=local-model-epp, gateway.networking.k8s.io/gateway-name) are for pods its Deployments make, not ' + request.userInfo.username
+      'the serving stack\'s labels (app=local-model, app=local-model-epp, app=gpu-metrics, gateway.networking.k8s.io/gateway-name) are for pods its Deployments make, not ' + request.userInfo.username
   - expression: >-
       request.operation != 'UPDATE' || !variables.wears || variables.wore &&
       variables.reserved.all(k, (has(object.metadata.labels) && k in object.metadata.labels ? object.metadata.labels[k] : '') ==

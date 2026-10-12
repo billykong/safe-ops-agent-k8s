@@ -11,7 +11,7 @@
 # The alerting rules (alerts.yml) watch the audit sink's counters (P4-04),
 # and whether oversight is working and the agent is still good (P4-21,
 # P4-22): rubber-stamp approvals, overridden critical findings, reopened
-# changes, and the latest eval run.
+# changes, and the latest eval run. And the local GPU's health (P5-06).
 # There's no Alertmanager here: alerts show in Prometheus's alerts page
 # and API.
 apiVersion: v1
@@ -71,6 +71,10 @@ data:
       authorization:
         credentials_file: /var/run/secrets/safe-ops.io/prometheus/token
       static_configs: [{targets: [local-model-epp.inference.svc.cluster.local:9090]}]
+    # The GPU (P5 M4): NVIDIA's DCGM exporter, whole-device counters. Only
+    # this pod may reach it (network policy). Down until P5 is installed.
+    - job_name: gpu
+      static_configs: [{targets: [gpu-metrics.inference.svc.cluster.local:9400]}]
     # The API server's own audit counters: events it gave up delivering to
     # the sink (P4-04). Same token and role as the controller's metrics.
     - job_name: kube-apiserver
@@ -161,6 +165,43 @@ data:
         labels: {severity: page}
         annotations:
           summary: "safety didn't hold in eval run {{ $labels.run }}: something unsafe got through"
+    # The local GPU (P5-06), from the DCGM exporter. Tickets, not pages:
+    # the local model is a judge and a fallback, not the agent's model.
+    - name: local-inference
+      rules:
+      - alert: GPUMetricsDown
+        expr: (up{job="gpu"} == 0 or absent(up{job="gpu"})) and on () (up{job="local-model-epp"} == 1)
+        for: 5m
+        labels: {severity: ticket}
+        annotations:
+          summary: "no GPU metrics: the DCGM exporter in namespace inference is down or can't read the GPU"
+      # vLLM's KV cache is fixed (400 MiB a replica), so memory that keeps
+      # climbing is something else on the GPU: under WSL2 that includes
+      # Windows itself.
+      - alert: GPUMemoryNearlyFull
+        expr: DCGM_FI_DEV_FB_USED / (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE + DCGM_FI_DEV_FB_RESERVED) > 0.9
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "GPU {{ $labels.gpu }} memory {{ $value | humanizePercentage }} used: a second vLLM replica may not fit"
+      # A laptop part: it throttles in the high 80s.
+      - alert: GPUHot
+        expr: DCGM_FI_DEV_GPU_TEMP > 85
+        for: 5m
+        labels: {severity: ticket}
+        annotations:
+          summary: "GPU {{ $labels.gpu }} at {{ $value }}C: expect throttled clocks and slower answers"
+      # The GPU is busy and requests still wait at both replicas: the
+      # local model is at capacity, and KEDA has nothing left to add.
+      - alert: LocalModelAtCapacity
+        expr: |
+          avg_over_time(DCGM_FI_DEV_GPU_UTIL[10m]) > 90
+          and on () (sum(llm_d_epp_average_queue_size{name="local-model"} * on(name) llm_d_epp_ready_endpoints{name="local-model"}) > 0)
+          and on () (sum(llm_d_epp_ready_endpoints{name="local-model"}) >= 2)
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "the local model is at capacity: GPU busy, both replicas up, requests still queueing"
 ---
 apiVersion: apps/v1
 kind: Deployment

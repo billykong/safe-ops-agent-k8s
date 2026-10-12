@@ -1,5 +1,5 @@
 # Autoscaling on queue depth (P5-05, M3): KEDA scales vLLM between 1 and 2
-# replicas (the GPU's two time slices) when requests queue in the pool.
+# replicas (two of the GPU's time slices) when requests queue in the pool.
 # The numbers come from the endpoint picker, which scrapes every vLLM pod;
 # KEDA asks Prometheus, and the HPA it creates divides by the target.
 #

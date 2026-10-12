@@ -68,6 +68,8 @@ It sends `traceparent` to both gateways, which add their own spans. The LLM gate
 
 Labels drawn from the agent's text (model names, server and tool names) are used only when they're known values, else `other`. That bounds cardinality and keeps content out of label values. Every series starts at zero, so the first increment of a series is counted by `increase()`.
 
+A second dashboard, `dashboards/local-inference.json` (P5 milestone 4), shows the local GPU from NVIDIA's DCGM exporter (Prometheus job `gpu`) beside the local model's pool and its requests at the LLM gateway; its alerts are the `local-inference` group. See the [P5 README](../05-local-inference/README.md#gpu-metrics-milestone-4).
+
 **The dashboard** (`dashboards/safe-ops-agent.json`, Grafana's home dashboard) shows, over the selected range:
 - tasks, estimated cost, cost per task and tokens per task;
 - the agent's escalation rate, the gate's escalation rate, and the share of tasks that needed a human;

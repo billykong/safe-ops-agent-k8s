@@ -24,7 +24,7 @@ Docker Engine and gVisor (`runsc` 20260928.0) from `scripts/setup-host.sh`. The 
 | No NVIDIA container toolkit | | Not installed: `scripts/model-server.sh` maps `/dev/dxg` and `/usr/lib/wsl` itself. If you install it, generate its CDI spec (`/etc/cdi/nvidia.yaml`) and the script uses `--gpus all` (untested here). Keep it patched (P5-09) |
 | Docker network `safe-ops-models` (172.30.99.0/28, internal) | The server's network; the kind node joins it as `eth1` | Created by `make p5`. Pick another subnet if it collides with your LAN |
 
-The Docker server holds about 3.2 GB of the GPU's 4 GB while it runs. In the cluster (P5 M3) each replica holds about 1.5 GB, and KEDA runs one or two (the GPU is time-sliced in two); two take about 6 GB of host memory. `make model-server-down` frees the GPU from the Docker server. In the cluster, pause KEDA at zero (scaling the Deployment alone doesn't hold: KEDA scales it back):
+The Docker server holds about 3.2 GB of the GPU's 4 GB while it runs. In the cluster (P5 M3) each replica holds about 1.5 GB, and KEDA runs one or two (the GPU is time-sliced in three: two slices for vLLM, one for the DCGM metrics exporter, which takes no GPU memory and about 400 MiB of host memory); two replicas take about 6 GB of host memory. `make model-server-down` frees the GPU from the Docker server. In the cluster, pause KEDA at zero (scaling the Deployment alone doesn't hold: KEDA scales it back):
 
 ```bash
 kubectl --context kind-safe-ops -n inference annotate scaledobject local-model autoscaling.keda.sh/paused-replicas=0 --overwrite

@@ -13,8 +13,8 @@
 #    pods in namespace inference, can't reach the proxy or vLLM; a pod can't
 #    join the pool (or pass for the proxy) by wearing its labels;
 #  - autoscaling on queue depth: under load (6 concurrent requests; vLLM
-#    runs 4 at once) KEDA asks for a second replica, which comes up on the
-#    GPU's second time slice and serves; with the load gone, back to one.
+#    runs 4 at once) KEDA asks for a second replica, which comes up on a
+#    second GPU time slice and serves; with the load gone, back to one.
 #    Requests may time out (503) only while the second replica starts: it
 #    slows the one serving (README, finding 21).
 # Needs `make p2 p3 durable p4 evals p5`, the LLM gateway in mock mode.
@@ -187,7 +187,7 @@ for _ in $(seq 1 24); do [ "$(kubectl get hpa -n $NS keda-hpa-local-model -o jso
 check "under load, KEDA asks for a second replica (within 2 minutes)" '^[0-9]+s$' "${want:+${want}s}"
 t0=$SECONDS; up=
 for _ in $(seq 1 96); do [ "$(replicas)" = "2 2" ] && { up=$((SECONDS - t0)); ready=$(date +%s); break; }; sleep 5; done
-check "... which is ready on the GPU's second slice (within 8 minutes)" '^[0-9]+s$' "${up:+${up}s}"
+check "... which is ready on a second GPU slice (within 8 minutes)" '^[0-9]+s$' "${up:+${up}s}"
 check "... first time, no restarts" '^0 0$' \
   "$(kubectl get pods -n $NS -l app=local-model -o jsonpath='{range .items[*]}{.status.containerStatuses[0].restartCount} {end}' | sed 's/ $//')"
 NEW=$(kubectl get pods -n $NS -l app=local-model --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}')
