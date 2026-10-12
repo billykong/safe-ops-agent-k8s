@@ -58,8 +58,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 
 ### P5: local inference
 1. **Done.** Model serving outside the cluster as a fallback: vLLM in Docker on the host's GPU, on a network only the cluster's node joins, reached through the LLM gateway only, with hash-verified safetensors weights; used as an eval judge (`make p5 test-local-model`).
-2. **Next.** In-cluster GPU via device plugin (k3s on WSL2 first, bare metal if needed).
-3. Serving stack behind the Gateway API Inference Extension (or KServe/llm-d); autoscaling on queue depth.
+2. **Done.** In-cluster GPU via the device plugin: on kind under WSL2, through CDI (no k3s, no bare metal). vLLM runs as a restricted pod in namespace `inference`; only that namespace may ask for the GPU; the Docker server is the fallback (`make p5 test-gpu`, `scripts/local-model-mode.sh`).
+3. **Next.** Serving stack behind the Gateway API Inference Extension (or KServe/llm-d); autoscaling on queue depth.
 4. GPU metrics.
 
 ## Deliverables
@@ -88,6 +88,6 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 | ~~Approval channel: CLI only, or a Slack-style webhook?~~ CLI (`approvalctl`) with certificate-authenticated approvers; a chat channel only if it can carry the same identity. | Resolved (P2 M2) |
 | ~~Kyverno vs OPA Gatekeeper vs plain ValidatingAdmissionPolicy for the action gate~~ OPA (Rego) embedded in the approval controller: it decides on the computed effect (dry run, blast radius, findings), with no webhook to fail; the VAPs stay as identity and admission guards. | Resolved (P3 M4) |
 | ~~SPIFFE/SPIRE vs projected SA tokens for workload identity~~ Projected tokens: audience-bound, pod-bound, revocable, nothing extra to run. SPIRE only if mutual TLS (P3-24) or workloads outside Kubernetes need it. | Resolved (P3 M1) |
-| Does the NVIDIA device plugin work on WSL2's `/dev/dxg` with k3s? | P5 M2 |
+| ~~Does the NVIDIA device plugin work on WSL2's `/dev/dxg` with k3s?~~ Yes, and in kind, without k3s: in CDI mode, with the driver copied into the node and four workarounds (P5 README finding 9). | Resolved (P5 M2) |
 | ~~The kind node sees `/dev/kvm`. Does Kata work there?~~ Yes, with Cloud Hypervisor (QEMU needs `vhost_vsock`, absent from the WSL2 kernel). gVisor's KVM platform is untried. | Resolved (P1 M7) |
 | ~~Which hosted model for the agent loop, and its cost budget~~ `claude-opus-5-5` at effort `medium`, `max_tokens` 8000 per decision; 200 000 tokens per agent identity per hour at the gateway. All are settings (`AGENT_MODEL`, the gateway's `MODELS` and `BUDGET_TOKENS`). | Resolved (P3 M2) |

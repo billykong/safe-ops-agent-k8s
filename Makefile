@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability audit test-audit evals test-evals ci-stack eval-gate test-eval-gate eval-kill-switch test-oversight p5 model-server-down test-local-model
+.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability audit test-audit evals test-evals ci-stack eval-gate test-eval-gate eval-kill-switch test-oversight p5 model-server-down test-local-model test-gpu
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -315,21 +315,38 @@ eval-kill-switch:
 test-oversight:
 	./scripts/test-oversight.sh
 
-# P5 milestone 1: a local model outside the cluster (P5-02): vLLM in Docker
-# on the host's GPU, on a network only this cluster's node joins, reached
-# through the LLM gateway only. `p5` verifies the pinned weights, starts the
-# server and applies the policies; model-server-down frees the GPU.
+# P5: a local model on the GPU, reached through the LLM gateway only. In the
+# cluster (milestone 2): the WSL GPU driver and the CDI hook into the node,
+# the NVIDIA device plugin, then vLLM as a restricted pod in namespace
+# inference. Outside it (milestone 1, the fallback): vLLM in Docker on a
+# network only the node joins. One at a time (4 GB):
+# `scripts/local-model-mode.sh cluster|docker`. model-server-down frees the
+# GPU from the Docker server.
 P5 := projects/05-local-inference
 
 p5:
-	./scripts/model-server.sh up
+	./scripts/node-gpu.sh
+	./scripts/device-plugin.sh
+	# The server's image (15 GB; 35 minutes to load): built once, loaded
+	# once. Not left to kind's own check: with Docker's containerd image
+	# store, docker's image ID (the manifest's digest) never equals the
+	# node's (the config's), so kind loads it again every time. A rebuilt
+	# image needs a new tag.
+	docker image inspect safe-ops-vllm:0.30.0-cu129 >/dev/null 2>&1 || docker build -t safe-ops-vllm:0.30.0-cu129 $(P5)/server
+	docker exec $(CLUSTER)-control-plane crictl inspecti safe-ops-vllm:0.30.0-cu129 >/dev/null 2>&1 || \
+	  kind load docker-image safe-ops-vllm:0.30.0-cu129 --name $(CLUSTER)
 	$(KUBECTL) apply -f $(P5)/manifests/
 	# The gateway mounts the server's key (Secret local-model-key, optional).
+	./scripts/model-server.sh key
 	$(KUBECTL) -n gateways rollout restart deploy/llm-gateway
 	$(KUBECTL) -n gateways rollout status deploy/llm-gateway --timeout=120s
+	./scripts/local-model-mode.sh cluster
 
 model-server-down:
 	./scripts/model-server.sh down
 
 test-local-model:
 	./scripts/test-local-model.sh
+
+test-gpu:
+	./scripts/test-gpu.sh

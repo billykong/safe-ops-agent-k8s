@@ -18,6 +18,8 @@
 #  - with the server down, the local model's requests fail closed (503
 #    model_unavailable) and the hosted models are unaffected; it comes back.
 # Needs `make p2 p3 durable p4 evals p5`, the LLM gateway in mock mode.
+# Switches the local model to Docker (scripts/local-model-mode.sh) for the
+# run, and back to the cluster afterwards if it was there.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 cd "$(dirname "$0")/.."
@@ -34,7 +36,9 @@ pass() { echo "PASS  $1"; }
 fail() { echo "FAIL  $1"; FAILED=1; }
 check() { if grep -qE -- "$2" <<<"$3"; then pass "$1"; else fail "$1: got: ${3:0:400}"; fi; }
 forward() { # NAMESPACE TARGET PORT LOCAL
-  kubectl port-forward -n "$1" "$2" "$4:$3" >/dev/null 2>&1 & PFS+=($!)
+  # command: kubectl is a function (lib.sh); backgrounding the function
+  # puts $! on a subshell, and killing that leaves the port-forward running.
+  command kubectl --context "$KUBE_CONTEXT" port-forward -n "$1" "$2" "$4:$3" >/dev/null 2>&1 & PFS+=($!)
   for _ in $(seq 1 30); do (exec 3<>/dev/tcp/127.0.0.1/$4) 2>/dev/null && return 0; sleep 1; done
   echo "port-forward to $2 didn't come up"; exit 1
 }
@@ -66,12 +70,17 @@ probe() { # NAMESPACE NAME [LABELS-JSON]: can a pod there connect to the server?
 }
 cleanup() {
   for p in "${PFS[@]}"; do kill "$p" 2>/dev/null || true; done
+  [ "${START_MODE:-docker}" = cluster ] && scripts/local-model-mode.sh cluster >/dev/null 2>&1
   rm -rf "$TMP" "${WT:-/nonexistent}"
 }
 trap cleanup EXIT
 [ "$(kubectl get configmap -n approval-system agent-kill-switch -o jsonpath='{.data.mode}')" = run ] \
   || { echo "the kill switch is engaged: scripts/kill-switch.sh status"; exit 1; }
 ./scripts/llm-gateway-mode.sh mock >/dev/null
+# This suite is the server outside the cluster (milestone 1): switch to it,
+# and back to the cluster at the end if that's where the model was.
+START_MODE=$(scripts/local-model-mode.sh status | cut -d: -f1)
+[ "$START_MODE" = docker ] || scripts/local-model-mode.sh docker
 [[ "$(scripts/model-server.sh status)" == *", ready"* ]] || { echo "the model server isn't ready: scripts/model-server.sh up"; exit 1; }
 
 echo "=== The weights (P5-08)"

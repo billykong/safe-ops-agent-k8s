@@ -24,7 +24,9 @@ Docker Engine and gVisor (`runsc` 20260928.0) from `scripts/setup-host.sh`. The 
 | No NVIDIA container toolkit | | Not installed: `scripts/model-server.sh` maps `/dev/dxg` and `/usr/lib/wsl` itself. If you install it, generate its CDI spec (`/etc/cdi/nvidia.yaml`) and the script uses `--gpus all` (untested here). Keep it patched (P5-09) |
 | Docker network `safe-ops-models` (172.30.99.0/28, internal) | The server's network; the kind node joins it as `eth1` | Created by `make p5`. Pick another subnet if it collides with your LAN |
 
-The server holds about 3.2 GB of the GPU's 4 GB while it runs; `make model-server-down` frees it.
+The server holds about 3.2 GB of the GPU's 4 GB while it runs, inside the cluster or out. `make model-server-down` frees it from the Docker server; `kubectl -n inference scale deploy/local-model --replicas=0` from the cluster.
+
+In cluster mode the kind node holds a copy of the WSL driver (`/usr/lib/wsl`, about 2 GB) and `nvidia-cdi-hook` (`scripts/node-gpu.sh`). A Windows NVIDIA driver update leaves the copy stale: run `scripts/node-gpu.sh` again, then restart the device plugin (`kubectl -n gpu-system rollout restart ds/nvdp-nvidia-device-plugin`). The server image (15 GB) is stored twice: in Docker and in the node's containerd.
 
 ## After a WSL restart or a `.wslconfig` change
 

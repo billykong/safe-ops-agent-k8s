@@ -37,7 +37,9 @@ wf_status() { tctl workflow describe --workflow-id "$1" -o json 2>/dev/null | py
 in_agent() { kubectl exec -i -n agent deploy/agent-worker -- python - "$@" < scripts/otel_probe.py; }
 # forward SVC_OR_DEPLOY PORT LOCAL: a port-forward for the rest of the run
 forward() {
-  kubectl port-forward -n "$1" "$2" "$4:$3" >/dev/null 2>&1 & PFS+=($!)
+  # command: kubectl is a function (lib.sh); backgrounding the function
+  # puts $! on a subshell, and killing that leaves the port-forward running.
+  command kubectl --context "$KUBE_CONTEXT" port-forward -n "$1" "$2" "$4:$3" >/dev/null 2>&1 & PFS+=($!)
   for _ in $(seq 1 30); do (exec 3<>/dev/tcp/127.0.0.1/$4) 2>/dev/null && return 0; sleep 1; done
   echo "port-forward to $2 didn't come up"; exit 1
 }

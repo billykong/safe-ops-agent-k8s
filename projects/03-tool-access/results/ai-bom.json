@@ -20,6 +20,14 @@
       "image": "docker.io/library/mock-model:dev",
       "imageID": "sha256:00840adc1c42c955396518122a26a95b1ca3a12a47a6616d3f6c5cced7bbfdce"
     },
+    "gpu-system/nvidia-device-plugin": {
+      "image": "sha256:fd1fb5fa1a7f78f1181f50145655e6f9d675e123438cf08493edc9c7fe052659",
+      "imageID": "nvcr.io/nvidia/k8s-device-plugin@sha256:27c1b2553a690ca3d29889dcd61df97525d46f58272c0be8dc63c2b18f120075"
+    },
+    "inference/local-model": {
+      "image": "docker.io/library/safe-ops-vllm:0.30.0-cu129",
+      "imageID": "docker.io/library/import-2026-10-12@sha256:a7589035f6eb74ddef7867b3059938d8c902daecbe603a98f6ecfd7b0cff6d62"
+    },
     "mcp-servers/incident-tracker": {
       "image": "docker.io/library/mcp-tools:dev",
       "imageID": "docker.io/library/import-2026-10-10@sha256:274501726b1541ac991891b0f4178cc355a4a895d5013dbf4d40762b87b7fb4b"
@@ -37,7 +45,7 @@
       "imageID": "sha256:e1534f2d0aa0ce2d79375ce20ac15a3405fc51c3e7bd374f4ac204bc94e1252c"
     }
   },
-  "generated": "2026-10-11T11:02:27Z",
+  "generated": "2026-10-12T10:17:16Z",
   "mcpGrants": {
     "system:serviceaccount:agent:proposer": {
       "incidents": [
@@ -79,35 +87,9 @@
         "repo": "Qwen/Qwen2.5-1.5B-Instruct-AWQ",
         "revision": "3ecffa0ceb27851800f45519bab9c457a04405e1",
         "server": {
-          "args": [
-            "serve",
-            "--model",
-            "/models/qwen2.5-1.5b-instruct",
-            "--served-model-name",
-            "qwen2.5-1.5b-instruct",
-            "--load-format",
-            "safetensors",
-            "--dtype",
-            "float16",
-            "--gpu-memory-utilization",
-            "0.80",
-            "--max-model-len",
-            "4096",
-            "--max-num-seqs",
-            "4",
-            "--enforce-eager",
-            "--enable-auto-tool-choice",
-            "--tool-call-parser",
-            "hermes",
-            "--host",
-            "0.0.0.0",
-            "--port",
-            "8000"
-          ],
-          "image": "safe-ops-vllm:0.30.0-cu129",
-          "imageID": "sha256:5de878c2569f023ce3d21402b65a0de8e2461a3f33c81f8ec5c67ff256d96afd"
+          "inCluster": "local-model.inference"
         },
-        "url": "http://172.30.99.10:8000"
+        "url": "http://local-model.inference.svc.cluster.local:8000"
       }
     }
   },

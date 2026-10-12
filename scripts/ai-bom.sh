@@ -50,14 +50,20 @@ server = (json.load(open(f"{tmp}/model-server.json")) or [None])[0]
 self_hosted = {}
 for entry in filter(None, (lenv.get("ROUTES") or "").split(",")):
     model, url = entry.split("=", 1)
-    self_hosted[model] = {"url": url, **locks.get(model, {}),
-                          "server": {"image": server["Config"]["Image"], "imageID": server["Image"], "args": server["Args"]} if server else "not running"}
+    if ".svc.cluster.local" in url:  # in the cluster (P5 M2): the pod's image is under components
+        srv = {"inCluster": url.split("//")[1].split(".svc")[0]}
+    else:                             # the Docker server outside the cluster (P5 M1)
+        srv = {"image": server["Config"]["Image"], "imageID": server["Image"], "args": server["Args"]} if server else "not running"
+    self_hosted[model] = {"url": url, **locks.get(model, {}), "server": srv}
 
 running = {}
 for p in json.load(open(f"{tmp}/pods.json"))["items"]:
     app = p["metadata"].get("labels", {}).get("app")
     ns = p["metadata"]["namespace"]
-    if ns not in ("agent", "gateways", "mcp-servers", "approval-system", "temporal") or not app:
+    if ns not in ("agent", "gateways", "mcp-servers", "approval-system", "temporal", "inference", "gpu-system"):
+        continue
+    app = app or p["metadata"].get("labels", {}).get("app.kubernetes.io/name")
+    if not app:
         continue
     for c in p.get("status", {}).get("containerStatuses", []):
         running.setdefault(f"{ns}/{app}", {"image": c["image"], "imageID": c["imageID"]})
@@ -90,8 +96,9 @@ md = [f"# AI bill of materials\n\nGenerated {bom['generated']} by `scripts/ai-bo
       f"| LLM gateway allows | {', '.join(f'`{m}`' for m in bom['models']['gatewayAllows'])} | upstream `{bom['models']['provider']}` |"]
 for m, h in self_hosted.items():
     srv = h["server"] if isinstance(h["server"], dict) else None
-    md.append(f"| Self-hosted (P5), via the gateway | `{m}`: `{h.get('repo')}` at `{h.get('revision')}` | `{h['url']}`; "
-              + (f"image `{srv['image']}` (`{srv['imageID']}`)" if srv else "server not running") + " |")
+    where = ("in the cluster (`" + srv["inCluster"] + "`, image under Running components)" if srv and "inCluster" in srv
+             else f"image `{srv['image']}` (`{srv['imageID']}`)" if srv else "server not running")
+    md.append(f"| Self-hosted (P5), via the gateway | `{m}`: `{h.get('repo')}` at `{h.get('revision')}` | `{h['url']}`; {where} |")
 for m, h in self_hosted.items():
     md += [f"\n### `{m}` weights (lock `{h.get('lock')}`)\n", "| File | SHA-256 |", "| --- | --- |"]
     md += [f"| `{f}` | `{d}` |" for f, d in sorted(h.get("files", {}).items())]
