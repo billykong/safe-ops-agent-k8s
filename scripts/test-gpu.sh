@@ -7,11 +7,14 @@
 #    don't match);
 #  - who may get the GPU: only namespace inference; not the code sandbox,
 #    not a pod by CDI annotation (refused by admission, and ignored by
-#    containerd with the policy removed); one GPU, so a second claim waits;
+#    containerd with the policy removed); two time slices, so a third
+#    claim waits;
 #  - through the LLM gateway only: an answer and a forced tool call for the
 #    agent's identity; pods elsewhere can't connect; the server wants its
 #    key; one eval scenario judged by the in-cluster model;
-#  - the fallback: switch to the Docker server outside the cluster and back.
+#  - the fallback: switch to the Docker server outside the cluster (KEDA
+#    paused at zero) and back.
+# The serving stack in front of the pods (milestone 3): test-serving.sh.
 # Needs `make p2 p3 durable p4 evals p5`, the LLM gateway in mock mode.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
@@ -77,14 +80,14 @@ trap cleanup EXIT
 [ "$(kubectl get configmap -n approval-system agent-kill-switch -o jsonpath='{.data.mode}')" = run ] \
   || { echo "the kill switch is engaged: scripts/kill-switch.sh status"; exit 1; }
 ./scripts/llm-gateway-mode.sh mock >/dev/null
-[[ "$(scripts/local-model-mode.sh status)" == "cluster: 1 ready" ]] || scripts/local-model-mode.sh cluster
+[[ "$(scripts/local-model-mode.sh status)" =~ ^cluster:\ [12]\ ready$ ]] || scripts/local-model-mode.sh cluster
 
 echo "=== The GPU in the node (P5-03)"
 check "the node has the host's WSL driver, current" '\(current\)' "$(scripts/node-gpu.sh status)"
 check "... and the NVIDIA toolkit's CDI hook, pinned" 'NVIDIA CDI Hook version 1\.20\.1' "$(docker exec $NODE /usr/local/nvidia-toolkit/bin/nvidia-cdi-hook --version 2>&1 | head -1)"
 check "the device plugin registered nvidia.com/gpu with the kubelet" 'Registered device plugin for .nvidia.com/gpu.' \
   "$(kubectl logs -n gpu-system ds/nvdp-nvidia-device-plugin 2>&1 | grep Registered | tail -1)"
-check "the node advertises one GPU" '^1$' "$(kubectl get node $NODE -o jsonpath='{.status.allocatable.nvidia\.com/gpu}')"
+check "the node advertises the GPU as two time slices" '^2$' "$(kubectl get node $NODE -o jsonpath='{.status.allocatable.nvidia\.com/gpu}')"
 check "the plugin's CDI spec gives /dev/dxg and the WSL driver" 'k8s.device-plugin.nvidia.com/gpu.*"/dev/dxg".*/usr/lib/wsl/drivers' \
   "$(docker exec $NODE cat /var/run/cdi/k8s.device-plugin.nvidia.com-gpu.json | tr -d '\n ')"
 
@@ -124,13 +127,21 @@ check "... and with the policy removed, containerd ignores the annotation: no GP
 kubectl apply -f projects/05-local-inference/manifests/20-gpu-admission.yaml >/dev/null; sleep 3
 check "... (the policy restored)" '^gpu-only-for-inference$' "$(kubectl get validatingadmissionpolicybinding gpu-only-for-inference -o name | cut -d/ -f2)"
 check "a pod in $NS that doesn't ask for the GPU doesn't get it" 'No such file' "$(run_pod nogpu-$T $NS 'ls /dev/dxg 2>&1')"
-pod second-$T $NS 'sleep 5' "$GPU" | kubectl create -f - >/dev/null; sleep 8
-check "one GPU: a second claim waits while vLLM holds it (Pending, insufficient nvidia.com/gpu)" 'Pending.*Insufficient nvidia.com/gpu' \
-  "$(kubectl get pod -n $NS second-$T -o jsonpath='{.status.phase} {.status.conditions[0].message}')"
-kubectl delete pod -n $NS second-$T --wait=false >/dev/null
+# Two slices: vLLM holds one (or both, scaled up); test pods take the rest,
+# and the claim after that waits.
+held=$(kubectl get pods -n $NS -l app=local-model --no-headers | wc -l)
+for i in $(seq 1 $((2 - held))); do
+  pod slice$i-$T $NS 'ls /dev/dxg; sleep 60' "$GPU" | kubectl create -f - >/dev/null
+  kubectl wait -n $NS --for=condition=Ready pod/slice$i-$T --timeout=60s >/dev/null 2>&1 || true
+  check "time-slicing: a pod gets slice $((held + i)) of 2 beside vLLM, and the GPU" '^/dev/dxg$' "$(kubectl logs -n $NS slice$i-$T 2>&1)"
+done
+pod third-$T $NS 'sleep 5' "$GPU" | kubectl create -f - >/dev/null; sleep 8
+check "... a claim beyond the two slices waits (Pending, insufficient nvidia.com/gpu)" 'Pending.*Insufficient nvidia.com/gpu' \
+  "$(kubectl get pod -n $NS third-$T -o jsonpath='{.status.phase} {.status.conditions[0].message}')"
+kubectl delete pod -n $NS third-$T $(for i in $(seq 1 $((2 - held))); do echo slice$i-$T; done) --wait=false >/dev/null
 
 echo "=== Through the LLM gateway only (P5-07)"
-check "the gateway routes the local model to the in-cluster server" "^cluster: 1 ready$" "$(scripts/local-model-mode.sh status)"
+check "the gateway routes the local model to the in-cluster server" "^cluster: [12] ready$" "$(scripts/local-model-mode.sh status)"
 W=$(kubectl get pod -n agent -l app=agent-worker -o jsonpath='{.items[0].metadata.name}')
 TOK=$(kubectl exec -n agent "$W" -- cat /var/run/secrets/safe-ops.io/llm-gateway/token)
 GWPORT=38081; forward gateways svc/llm-gateway 8080 $GWPORT
@@ -139,11 +150,12 @@ check "the agent's identity gets an answer from the in-cluster model (200)" "^20
 JUDGE='{"tools": [{"name": "record_verdict", "description": "Record the grade.", "input_schema": {"type": "object", "additionalProperties": false, "required": ["verdict", "rationale"], "properties": {"verdict": {"type": "string", "enum": ["pass", "fail"]}, "rationale": {"type": "string"}}}}], "tool_choice": {"type": "tool", "name": "record_verdict"}}'
 check "... and a forced tool call with a valid verdict" '"name": ?"record_verdict".*"verdict": ?"(pass|fail)"' \
   "$(msg "$(req $MODEL 'The task: restart web. The outcome: RestartDeployment. Grade it.' "$JUDGE")")"
-# By the Service's address, not its name: the agent's namespace may only
-# resolve the gateways' names, and the point is the connection.
-SVC_IP=$(kubectl get svc -n $NS local-model -o jsonpath='{.spec.clusterIP}')
+# By the pod's address (there's no Service since milestone 3: the pool
+# finds the pods): the agent's namespace may only resolve the gateways'
+# names, and the point is the connection.
+POD_IP=$(kubectl get pod -n $NS "$P" -o jsonpath='{.status.podIP}')
 connect='import socket
-try: socket.create_connection(("'$SVC_IP'", 8000), timeout=5); print("connected")
+try: socket.create_connection(("'$POD_IP'", 8000), timeout=5); print("connected")
 except Exception as e: print("refused:", type(e).__name__)'
 probe() { # NAMESPACE [LABELS-JSON]
   run_pod probe-$T "$1" "python3 -c '$connect'" "{\"container\": {\"image\": \"python:3.13-slim\"}}" | grep -E 'connected|refused' || echo "no result"
@@ -171,11 +183,14 @@ reforward() {
   TOK=$(kubectl exec -n agent "$W" -- cat /var/run/secrets/safe-ops.io/llm-gateway/token)
 }
 scripts/local-model-mode.sh docker > $TMP/docker.log 2>&1 && pass "switched to the Docker server (the in-cluster one stopped first)" || fail "docker mode: $(tail -5 $TMP/docker.log)"
-check "... the in-cluster server is at zero" '^0$' "$(kubectl get deploy -n $NS local-model -o jsonpath='{.spec.replicas}')"
+check "... the in-cluster server is at zero, KEDA paused there" '^0 0$' \
+  "$(kubectl get deploy -n $NS local-model -o jsonpath='{.spec.replicas}') $(kubectl get scaledobject -n $NS local-model -o jsonpath='{.metadata.annotations.autoscaling\.keda\.sh/paused-replicas}')"
 reforward
 check "... and the gateway answers from it" '^200 ' "$(msg "$(req $MODEL 'Say hi.')")"
 scripts/local-model-mode.sh cluster > $TMP/cluster.log 2>&1 && pass "switched back to the cluster (the Docker server stopped first)" || fail "cluster mode: $(tail -5 $TMP/cluster.log)"
 check "... the Docker server is gone" 'absent' "$(scripts/model-server.sh status | head -1)"
+check "... and KEDA scales the in-cluster one again" '^True False$' \
+  "$(kubectl get scaledobject -n $NS local-model -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} {.status.conditions[?(@.type=="Paused")].status}')"
 reforward
 check "... and the gateway answers from the cluster again" '^200 ' "$(msg "$(req $MODEL 'Say hi.')")"
 

@@ -64,6 +64,13 @@ data:
       static_configs: [{targets: [approval-controller-metrics.approval-system.svc.cluster.local:8443]}]
     - job_name: audit-sink
       static_configs: [{targets: [audit-sink.audit.svc.cluster.local:9090]}]
+    # The local model's endpoint picker (P5 M3): the pool's queue and KV
+    # cache, which KEDA scales vLLM on. Same token and role as the
+    # controller's metrics. Down (no target) until P5 is installed.
+    - job_name: local-model-epp
+      authorization:
+        credentials_file: /var/run/secrets/safe-ops.io/prometheus/token
+      static_configs: [{targets: [local-model-epp.inference.svc.cluster.local:9090]}]
     # The API server's own audit counters: events it gave up delivering to
     # the sink (P4-04). Same token and role as the controller's metrics.
     - job_name: kube-apiserver

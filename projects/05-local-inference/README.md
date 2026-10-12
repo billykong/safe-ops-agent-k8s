@@ -7,13 +7,13 @@ Requirements and status: [docs/prd/projects/p5-local-inference.md](../../docs/pr
 
 ## Milestones
 1. [x] Model serving outside the cluster (Docker, the host's GPU) as a fallback, called from the cluster through the LLM gateway only. `make p5 test-local-model`: 45 checks, 1 known gap ([GAP-09](../../docs/known-gaps.md#gap-09-the-node-can-reach-the-local-model-server))
-2. [x] In-cluster GPU via the device plugin: works on kind under WSL2, with no k3s or bare metal. vLLM runs as a restricted pod; the Docker server stays as the fallback. `make p5 test-gpu`: 35 checks
-3. [ ] Serving stack behind the Gateway API Inference Extension (or KServe/llm-d); autoscaling on queue depth
+2. [x] In-cluster GPU via the device plugin: works on kind under WSL2, with no k3s or bare metal. vLLM runs as a restricted pod; the Docker server stays as the fallback. `make p5 test-gpu`: 37 checks
+3. [x] Serving stack behind the Gateway API Inference Extension: an InferencePool with llm-d's endpoint picker, behind an agentgateway Gateway; KEDA scales vLLM from 1 to 2 replicas on the GPU's two time slices when requests queue. `make p5 test-serving`: 32 checks, 1 known gap ([GAP-10](../../docs/known-gaps.md#gap-10-the-agentgateway-controller-reads-every-secret))
 4. [ ] GPU metrics
 
 ## How it works
 
-The local model runs in one of two places, one at a time (the GPU has 4 GB): inside the cluster on the GPU through the NVIDIA device plugin (milestone 2, the default), or outside it in Docker (milestone 1, the fallback). `scripts/local-model-mode.sh cluster|docker` stops one, starts the other and points the gateway's route at it. Same image, weights, settings and key either way.
+The local model runs in one of two places, one at a time (the GPU has 4 GB): inside the cluster on the GPU through the NVIDIA device plugin, behind the serving stack (milestones 2 and 3, the default), or outside it in Docker (milestone 1, the fallback). `scripts/local-model-mode.sh cluster|docker` stops one, starts the other and points the gateway's route at it. Same image, weights, settings and key either way.
 
 ### Inside the cluster (milestone 2)
 
@@ -48,11 +48,72 @@ flowchart LR
 
 **The device plugin, in CDI mode.** `scripts/device-plugin.sh` renders NVIDIA's chart (0.20.1, image pinned by digest) with [device-plugin/values.yaml](device-plugin/values.yaml) and applies it with one patch ([device-plugin/kustomize-patch.yaml](device-plugin/kustomize-patch.yaml)). With `deviceListStrategy: cdi-cri` the plugin answers an allocation with a CDI device name, and containerd 2.3 (CDI on by default) applies the spec the plugin wrote to `/var/run/cdi`: `/dev/dxg`, the driver's files, and the hook that updates the container's library cache. No NVIDIA container runtime, and nothing installed on the WSL host. The plugin runs privileged, alone in namespace `gpu-system` (Pod Security `privileged`): NVML opens `/dev/dxg`, which a container gets only privileged or through CDI, and the plugin is what hands out CDI devices.
 
-**vLLM as an ordinary pod.** [manifests/30-inference.yaml](manifests/30-inference.yaml): namespace `inference`, Pod Security `restricted`. The pod asks for `nvidia.com/gpu: 1` and gets the GPU without privileges, capabilities or a host path. The weights are a pre-bound read-only volume of the verified copy in the node; an init container checks them against the lock before every start (every hash, no other files, no `auto_map`) and stops the pod if they don't match. Probes are `exec`: on this cluster the kubelet's traffic reaches pods as `world`, which default-deny ingress drops (P1 README finding 6). One GPU and no time-slicing, so a second pod asking for it waits `Pending`.
+**vLLM as an ordinary pod.** [manifests/30-inference.yaml](manifests/30-inference.yaml): namespace `inference`, Pod Security `restricted`. The pod asks for `nvidia.com/gpu: 1` and gets the GPU without privileges, capabilities or a host path. The weights are a pre-bound read-only volume of the verified copy in the node; an init container checks them against the lock before every start (every hash, no other files, no `auto_map`) and stops the pod if they don't match. Probes are `exec`: on this cluster the kubelet's traffic reaches pods as `world`, which default-deny ingress drops (P1 README finding 6). Since milestone 3 the plugin time-slices the GPU in two (`nvidia.com/gpu: 2`), for a second replica; a third claim waits `Pending`.
 
 **Who may get the GPU (P5-09).** The device plugin gives `nvidia.com/gpu` to any pod that asks; admission decides who may ask. [manifests/20-gpu-admission.yaml](manifests/20-gpu-admission.yaml) refuses a pod requesting any `nvidia.com/*` resource outside namespace `inference`: the code sandboxes (gVisor or Kata, namespace `sandboxes`) can't get it whatever RBAC allows. It also refuses `cdi.k8s.io/` pod annotations. containerd 2.3 ignores those from pods today (the suite removes the policy and checks), so that rule holds if that changes. A privileged pod sees every device on the node; Pod Security keeps those to `gpu-system` and `kube-system`.
 
-**Reachable only through the gateway (P5-07).** Namespace `inference` is default-deny both ways; one policy admits the LLM gateway on port 8000, and the gateway's egress policy allows that Service's name and port. The server has no egress at all. The same bearer key as outside the cluster (Secret `inference/local-model-key`), so a pod that gets past the policy still can't use it.
+**Reachable only through the gateway (P5-07).** Namespace `inference` is default-deny both ways. In milestone 2 one policy admitted the LLM gateway on port 8000; since milestone 3 the serving stack's proxy and endpoint picker are the only clients, and the LLM gateway reaches the proxy (next section). The server has no egress at all. The same bearer key as outside the cluster (Secret `inference/local-model-key`), so a pod that gets past the policy still can't use it.
+
+### The serving stack (milestone 3)
+
+```mermaid
+flowchart LR
+  subgraph gw["gateways"]
+    L["llm-gateway<br/>identity, budgets, audit"]
+  end
+  subgraph agw["agentgateway-system"]
+    C["agentgateway controller"]
+  end
+  subgraph inf["inference (restricted, default-deny)"]
+    P["inference-gateway proxy<br/>Gateway + HTTPRoute"]
+    E["endpoint picker<br/>llm-d Router"]
+    IP{{"InferencePool local-model<br/>app=local-model :8000"}}
+    V1["vLLM replica 1<br/>GPU slice 1"]
+    V2["vLLM replica 2<br/>GPU slice 2"]
+  end
+  subgraph obs["observability"]
+    PR["Prometheus"]
+  end
+  subgraph keda["keda"]
+    K["KEDA operator + HPA"]
+  end
+  L -- ":8080" --> P
+  C -. "xDS :9978" .-> P
+  P -- "ext_proc: which pod?" --> E
+  P --> V1
+  P --> V2
+  E -. "/metrics: queue, KV cache" .-> V1
+  E -. scrape .-> V2
+  IP --- V1
+  IP --- V2
+  PR -- "token" --> E
+  K -- "requests in flight" --> PR
+  K -- "replicas 1..2" --> V1
+```
+
+The LLM gateway stays the one way in: identity, budgets, policy and audit are still its. Since milestone 3 its route for the local model is the inference gateway, `http://inference-gateway.inference.svc.cluster.local:8080`, rather than a Service in front of vLLM. `scripts/serving-stack.sh` installs everything below, every download pinned (versions, CRD manifests by SHA-256, images by digest); `make p5` runs it.
+
+**The Gateway API Inference Extension, and who implements what.** Since GIE v1.6 the extension is the `InferencePool` API (`inference.networking.k8s.io/v1`) and the endpoint picker protocol; the full endpoint picker (EPP) moved to llm-d, as the llm-d Router (finding 13). So three projects meet here:
+- **GIE v1.6.2:** the `InferencePool` CRD. The pool `local-model` selects the vLLM pods (`app=local-model`, port 8000) and names its picker ([serving/manifests/40-endpoint-picker.yaml](serving/manifests/40-endpoint-picker.yaml)).
+- **llm-d Router v0.11.0:** the endpoint picker. The proxy asks it, over Envoy's `ext_proc`, which pod gets each request. It scores the pool's pods on queue length and KV-cache use (scraped from each pod's `/metrics`) and on prefix-cache hits (from what it routed): the chart's scorers, reweighted to put load first (finding 20). Trimmed from its chart, sized for this laptop (the chart asks for 8 CPUs and 8 GiB), restricted. `failureMode: FailOpen`: with the picker down the proxy picks a pod of the pool itself; nothing opens, only the scoring is lost.
+- **agentgateway v1.6.0:** the Gateway API implementation, GIE's own quickstart choice. Its controller (`agentgateway-system`) turns the `Gateway` and `HTTPRoute` in [serving/manifests/41-gateway.yaml](serving/manifests/41-gateway.yaml) into a proxy Deployment in `inference`, configured over xDS. The route sends `/v1/` to the pool.
+
+**Autoscaling on queue depth.** The device plugin advertises the GPU as two time slices ([device-plugin/values.yaml](device-plugin/values.yaml)), and two vLLM replicas fit in 4 GB with a fixed 400 MiB KV cache each (14.6k tokens; finding 16). KEDA 2.21.0 ([serving/keda-values.yaml](serving/keda-values.yaml), [serving/manifests/43-autoscaling.yaml](serving/manifests/43-autoscaling.yaml)) asks Prometheus for the pool's requests in flight (running plus waiting), from the picker's metrics, and the HPA it creates targets 4 per replica, vLLM's batch (`--max-num-seqs`): a fifth concurrent request queues and asks for the second replica. Not the queue alone: that oscillates (finding 15). Down to one after two quiet minutes. A second replica is ready 3 to 6 minutes after it's asked for, so this is for sustained load: under load the second replica doubled throughput, and the picker sent it requests as soon as it was ready. While it loads, it slows the one serving (finding 21). `scripts/local-model-mode.sh docker` pauses KEDA at zero (otherwise it would scale the server back up while the Docker one holds the GPU), and `cluster` unpauses it.
+
+**Who may reach what (P5-07).** [serving/manifests/42-networkpolicy.yaml](serving/manifests/42-networkpolicy.yaml), with namespace `inference` default-deny:
+- the LLM gateway may reach the proxy on 8080, and nothing in `inference` but it;
+- the proxy may reach vLLM (8000), the picker (9002) and its controller's xDS port (9978);
+- the picker may reach vLLM (for `/metrics`) and the API server. Its own `/metrics` authenticates and authorizes each scrape (TokenReview, SubjectAccessReview), and Prometheus has the token;
+- vLLM admits the proxy and the picker only. The milestone 2 Service and the LLM gateway's direct policy are gone.
+- `agentgateway-system` and `keda` are default-deny too: the controller reaches only the API server; KEDA's operator reaches the API server and Prometheus, and its metrics server reaches the operator.
+
+The kubelet's probes and the API server's calls to KEDA's metrics server arrive as `world` on this cluster (P1 finding 6), and these images are distroless, with nothing an `exec` probe could run. So each health port, and nothing else, admits `world` (finding 17).
+
+**Who may join the pool.** The pool finds its pods by a label, and the network policies find the proxy and the picker by theirs. A hand-made pod in `inference` wearing `app=local-model` would join the pool and receive prompts. [serving/manifests/44-pool-admission.yaml](serving/manifests/44-pool-admission.yaml) reserves those labels for pods the ReplicaSet controller creates. A pod created by anyone else is refused, and so is relabelling a running pod into the pool. Who may change the Deployments is RBAC's to decide (finding 18).
+
+**Least privilege for the add-ons.** Their defaults were wide (finding 14):
+- *agentgateway:* writes (Deployments, Services, Secrets) only in `inference` (`rbac.gatewayNamespaces`), and its Gateway's Service is a ClusterIP. Its default is a LoadBalancer, which on kind is also a NodePort on the node: reachable from the host and from every container on Docker's `kind` network, the `ml` cluster's among them, past the LLM gateway. It still reads every Secret in the cluster ([GAP-10](../../docs/known-gaps.md#gap-10-the-agentgateway-controller-reads-every-secret)).
+- *KEDA:* watches `inference` only, reads Secrets in its own namespace only, and scales Deployments and StatefulSets only, not any resource with a scale subresource. Its admission webhooks are off (one ScaledObject, written here; not worth their memory). The chart's own Cilium policies (egress to every pod in the cluster) are replaced by tighter ones.
 
 ### Outside the cluster (milestone 1, the fallback)
 
@@ -122,11 +183,31 @@ flowchart LR
 10. **containerd 2.3 ignores CDI pod annotations.** With CDI on, containerd could in principle honour `cdi.k8s.io/...` annotations, letting any pod take a device without asking the scheduler. It doesn't: a pod annotated with the plugin's device got no `/dev/dxg`. Admission refuses the annotation anyway, in case a later containerd changes that.
 11. **Docker's containerd image store breaks `kind load`'s check.** Docker 29 reports an image's manifest digest as its ID; the node reports the config's. kind compares the two, never finds the image, and loads 15 GB again every time (35 minutes). `make p5` checks for the tag in the node itself.
 12. **Default-deny namespaces need `exec` probes here.** The kubelet's `httpGet` probes reached vLLM as `world` and were dropped, as P1 found for the sandboxes (its finding 6).
+13. **The Inference Extension is an API now, not a picker.** In GIE v1.6 the full endpoint picker, and the `InferenceObjective` and `InferenceModelRewrite` APIs, moved to llm-d (the llm-d Router, formerly the inference scheduler). GIE keeps `InferencePool`, the picker protocol, conformance, and `lwepp`, a reference picker meant for conformance tests only. The listed conformant gateways are Istio, agentgateway and NGINX Gateway Fabric; GIE's quickstart uses agentgateway. Cilium's own Gateway API implementation has no `InferencePool` support.
+14. **The add-ons' defaults were wider than the job.**
+    - agentgateway gave its Gateway a `LoadBalancer` Service. On kind that also opens a NodePort on the node, which the host and every container on Docker's `kind` network (the `ml` cluster's nodes too) could reach, past the LLM gateway.
+    - Its controller may write Deployments, Services and Secrets in every namespace (scoped with `rbac.gatewayNamespaces`) and reads every Secret (GAP-10).
+    - Neither its controller nor the proxy it generates set a seccomp profile, so Pod Security `restricted` refused both until the values and an `AgentgatewayParameters` overlay set one.
+    - KEDA's chart grants scale on every resource with a scale subresource (`apiGroups: *`), reads Secrets cluster-wide, and its optional Cilium policies allow egress to every pod in the cluster.
+15. **Scaling on queue length alone oscillates.** With the target "2 waiting per replica", a queue of 6 called a second replica; the two then drained the queue, the HPA's arithmetic (waiting divided by target) asked for one again after the stabilization window, and the queue would come back. The queue measures the excess over capacity, not the load. The trigger is requests in flight (running plus waiting) with a target of one batch (4) per replica: it still scales up exactly when a queue forms, and holds while the load lasts.
+16. **Time-slicing breaks vLLM's memory profiling.** vLLM sizes its KV cache by profiling the GPU at startup, and it measures the whole device. Started while the first replica was busy under the load that called it, the second counted the first one's activations as its own: `Available KV cache memory: -0.75 GiB`, exit, restart, ready only once the load had passed. A slice is a share of time, not of memory. `--kv-cache-memory-bytes` (400 MiB) skips the profiling, and the second replica came up first time under load.
+17. **Distroless images can't have `exec` probes.** The picker and the proxy carry one binary and no shell, so the kubelet's gRPC and HTTP probes, which arrive as `world` here (finding 12), need the health port opened to `world` and `host`. Only that port is opened: a probe port answers nothing else.
+18. **Pool membership is a label.** The `InferencePool` selects pods by label, as a Service does, so any pod in its namespace with the right label receives prompts, and network policies keyed on the proxy's label would let an impostor reach vLLM. A ValidatingAdmissionPolicy reserves those labels for the ReplicaSet controller (`request.userInfo`, which a pod's creator can't forge, unlike `ownerReferences`), and refuses adding them to a running pod.
+19. **Scaling up on one GPU is slow.** The second replica was ready 3 to 6 minutes after KEDA asked for it: the image is already on the node, but the weights are verified, then loaded and warmed on a GPU that the first replica keeps busy. It doubled throughput once ready. Queue-driven scaling suits sustained load here; a burst is over before the help arrives.
+20. **Prefix-cache affinity can starve a new replica.** The chart weighs prefix-cache hits (3) above queue length (2) and KV-cache use (2). Under the suite's load, all requests with the same prompt, the picker kept sending every one to the first replica, with two waiting there, while the second sat ready and idle (88 to 0). KEDA kept the idle replica, since the in-flight count stayed above one batch. The agent's and the judge's requests share long system prompts, so real traffic would do the same. With a 14k-token KV cache there's little worth reusing, so the weights here are queue 3, KV cache 2, prefix 1.
+21. **A starting replica slows the one serving.** Time-slicing gives each process turns on the GPU, not a share of it, and gives none a higher priority. Measured with `vmstat` and `nvidia-smi` every 5s through a scale-up under load:
+    - The new replica's model loading (reading the weights, then repacking them for vLLM's Marlin AWQ kernels on the GPU) took 81s, against 11 to 13s on an idle GPU.
+    - For that minute the GPU sat at 100% with 3.96 of its 4 GB in use, and the serving replica completed requests at about a third of its rate. Swapping was light throughout, so this is GPU contention, not host memory pressure.
+    - In one run, requests queued then outlasted the LLM gateway's 60s upstream timeout: 12 got 503s, all inside that window. The agent reads a 503 as "model unavailable" and escalates.
+    - vLLM picks Marlin for AWQ whatever `--quantization` says, so a kernel without the repack isn't an option in 0.30.
+    - The suite allows 503s only from KEDA's ask until a minute after the new replica is ready, and reports how many.
+    - Ways out: a GPU large enough that the replicas don't share one (MIG, or a second card), a longer upstream timeout for the local model, or a replica kept warm instead of scaled from one.
 
 ## Run
 
 ```bash
-make p5                  # driver and hook into the node, device plugin, vLLM in the cluster, gateway route
+make p5                  # driver and hook into the node, device plugin, vLLM in the cluster, the serving stack, gateway route
+make test-serving        # milestone 3's checks (~15 minutes: scales to two replicas and back; ~50k of the agent's tokens)
 make test-gpu            # milestone 2's checks (~15 minutes: it switches to Docker and back)
 make test-local-model    # milestone 1's checks, on the Docker server (switches there and back; ~20 minutes)
 scripts/local-model-mode.sh cluster|docker|status
@@ -144,11 +225,18 @@ The first `make p5` loads the 15 GB server image into the node: 35 minutes. In c
 | `server/Dockerfile`, `server/requirements-torch.txt` | vLLM 0.30.0 for CUDA 12.9, with the torch it was built against |
 | `manifests/10-networkpolicy.yaml` | The Docker server: the gateway's egress to it; the clusterwide deny for every other pod |
 | `manifests/20-gpu-admission.yaml` | Only namespace `inference` may ask for the GPU; no CDI annotations |
-| `manifests/30-inference.yaml` | vLLM in the cluster: namespace, weights volume, Deployment, Service, network policies |
-| `device-plugin/` | The NVIDIA device plugin's values and its WSL2 patch |
+| `manifests/30-inference.yaml` | vLLM in the cluster: namespace, weights volume, Deployment, network policies |
+| `device-plugin/` | The NVIDIA device plugin's values (CDI, two time slices) and its WSL2 patch |
+| `serving/agentgateway-values.yaml`, `serving/keda-values.yaml` | The charts' values: agentgateway and KEDA, scoped down |
+| `serving/manifests/40-endpoint-picker.yaml` | The InferencePool and llm-d's endpoint picker |
+| `serving/manifests/41-gateway.yaml` | The Gateway (agentgateway), its proxy's parameters, the route to the pool |
+| `serving/manifests/42-networkpolicy.yaml` | Who reaches what: proxy, picker, controller, KEDA, Prometheus |
+| `serving/manifests/43-autoscaling.yaml` | KEDA's ScaledObject: 1 to 2 replicas on requests in flight |
+| `serving/manifests/44-pool-admission.yaml` | Only the Deployments' pods may wear the pool's and the proxy's labels |
+| `../../scripts/serving-stack.sh` | Install the stack: CRDs, agentgateway, KEDA, the manifests |
 | `../../scripts/node-gpu.sh` | The WSL driver, the CDI hook and the label into the node |
 | `../../scripts/device-plugin.sh` | Render, patch and apply the device plugin |
 | `../../scripts/local-model-mode.sh` | cluster or docker: which server runs and gets the route |
 | `../../scripts/model-server.sh` | The Docker server: fetch, verify, up, down, key, status |
-| `../../scripts/test-gpu.sh`, `../../scripts/test-local-model.sh` | The suites (milestones 2 and 1) |
+| `../../scripts/test-serving.sh`, `../../scripts/test-gpu.sh`, `../../scripts/test-local-model.sh` | The suites (milestones 3, 2 and 1) |
 | `../03-tool-access/gateway/internal/upstream` | The gateway's per-model routing and per-upstream keys |

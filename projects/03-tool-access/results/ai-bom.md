@@ -1,6 +1,6 @@
 # AI bill of materials
 
-Generated 2026-10-12T10:17:16Z by `scripts/ai-bom.sh` from the code and the running cluster (P3-23).
+Generated 2026-10-12T22:41:08Z by `scripts/ai-bom.sh` from the code and the running cluster (P3-23).
 
 ## Models
 
@@ -8,7 +8,7 @@ Generated 2026-10-12T10:17:16Z by `scripts/ai-bom.sh` from the code and the runn
 | --- | --- | --- |
 | Agent (`AgentWorkflow`) | `claude-opus-5-5` | effort medium, max_tokens 8000, up to 6 model calls per decision, refusal fallbacks `default` |
 | LLM gateway allows | `claude-opus-5-5`, `claude-sonnet-5-5`, `qwen2.5-1.5b-instruct` | upstream `http://mock-model.gateways.svc.cluster.local:8080` |
-| Self-hosted (P5), via the gateway | `qwen2.5-1.5b-instruct`: `Qwen/Qwen2.5-1.5B-Instruct-AWQ` at `3ecffa0ceb27851800f45519bab9c457a04405e1` | `http://local-model.inference.svc.cluster.local:8000`; in the cluster (`local-model.inference`, image under Running components) |
+| Self-hosted (P5), via the gateway | `qwen2.5-1.5b-instruct`: `Qwen/Qwen2.5-1.5B-Instruct-AWQ` at `3ecffa0ceb27851800f45519bab9c457a04405e1` | `http://inference-gateway.inference.svc.cluster.local:8080`; in the cluster (`inference-gateway.inference`, image under Running components) |
 
 ### `qwen2.5-1.5b-instruct` weights (lock `projects/05-local-inference/models/qwen2.5-1.5b-instruct-awq.sha256`)
 
@@ -55,12 +55,17 @@ Generated 2026-10-12T10:17:16Z by `scripts/ai-bom.sh` from the code and the runn
 | Component | Image | Digest running |
 | --- | --- | --- |
 | agent/agent-worker | `docker.io/library/approval-agent:dev` | `sha256:095626c9d3d58387c1a5bcca239e1ccba483337b92bf02e96a51f2892f4a3606` |
+| agentgateway-system/agentgateway | `cr.agentgateway.dev/controller:v1.6.0` | `sha256:d84259a7e2d87f8f39bae385d4b032d823c0a4450aecb32e0e31e2258449645b` |
 | approval-system/approval-controller | `docker.io/library/approval-controller:dev` | `sha256:f26572b196d321948b3645dcd7ba54db0e93a6965f9f6ea527ef1435335b2d6a` |
 | gateways/llm-gateway | `docker.io/library/agent-gateway:dev` | `sha256:a5596d2f35ae997042ad5b8b03d4f99ad8222d6ff1553dceb78482c9684b61b6` |
 | gateways/mcp-gateway | `docker.io/library/mcp-gateway:dev` | `sha256:6877b4e38758ab9e801effec00fa7bc9b6675b04389dabe958a8496fce58c345` |
 | gateways/mock-model | `docker.io/library/mock-model:dev` | `sha256:00840adc1c42c955396518122a26a95b1ca3a12a47a6616d3f6c5cced7bbfdce` |
-| gpu-system/nvidia-device-plugin | `sha256:fd1fb5fa1a7f78f1181f50145655e6f9d675e123438cf08493edc9c7fe052659` | `sha256:27c1b2553a690ca3d29889dcd61df97525d46f58272c0be8dc63c2b18f120075` |
+| gpu-system/nvidia-device-plugin | `nvcr.io/nvidia/k8s-device-plugin:v0.20.1@sha256:27c1b2553a690ca3d29889dcd61df97525d46f58272c0be8dc63c2b18f120075` | `sha256:27c1b2553a690ca3d29889dcd61df97525d46f58272c0be8dc63c2b18f120075` |
+| inference/inference-gateway | `cr.agentgateway.dev/agentgateway:v1.6.0@sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c` | `sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c` |
 | inference/local-model | `docker.io/library/safe-ops-vllm:0.30.0-cu129` | `sha256:a7589035f6eb74ddef7867b3059938d8c902daecbe603a98f6ecfd7b0cff6d62` |
+| inference/local-model-epp | `ghcr.io/llm-d/llm-d-router-endpoint-picker:v0.11.0@sha256:39257d24552d16d8f215d3de25cc734fd44af3b282b67032db01aff900c610cf` | `sha256:39257d24552d16d8f215d3de25cc734fd44af3b282b67032db01aff900c610cf` |
+| keda/keda-operator | `ghcr.io/kedacore/keda:2.21.0@sha256:81fe6547ce8d1cc29273f887b76507e9b853e5bc1f875ec23fe60061a38ed809` | `sha256:81fe6547ce8d1cc29273f887b76507e9b853e5bc1f875ec23fe60061a38ed809` |
+| keda/keda-operator-metrics-apiserver | `ghcr.io/kedacore/keda-metrics-apiserver:2.21.0@sha256:255375037fe592732eeb554743aae360c2da88cf0b9b1258d0a987ef885f0881` | `sha256:255375037fe592732eeb554743aae360c2da88cf0b9b1258d0a987ef885f0881` |
 | mcp-servers/incident-tracker | `docker.io/library/mcp-tools:dev` | `sha256:274501726b1541ac991891b0f4178cc355a4a895d5013dbf4d40762b87b7fb4b` |
 | mcp-servers/incidents-mcp | `docker.io/library/mcp-tools:dev` | `sha256:274501726b1541ac991891b0f4178cc355a4a895d5013dbf4d40762b87b7fb4b` |
 | mcp-servers/netdiag-mcp | `docker.io/library/mcp-tools:dev` | `sha256:274501726b1541ac991891b0f4178cc355a4a895d5013dbf4d40762b87b7fb4b` |

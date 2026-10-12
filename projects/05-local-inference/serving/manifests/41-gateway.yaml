@@ -1,0 +1,80 @@
+# The inference gateway (P5-05, M3): a Gateway API Gateway, implemented by
+# agentgateway, whose one route sends everything to the InferencePool.
+# The LLM gateway (P3) is its only client, and still the only way to the
+# model: identity, budgets and audit stay there; this one picks the pod.
+#
+#   llm-gateway (gateways) -> inference-gateway (this proxy) -> EPP picks
+#   -> a vLLM pod of the pool
+#
+# The controller (namespace agentgateway-system) runs the proxy as a
+# Deployment and Service named inference-gateway, here, shaped by the
+# parameters below.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: inference-gateway
+  namespace: inference
+spec:
+  image:
+    registry: cr.agentgateway.dev
+    repository: agentgateway
+    tag: v1.6.0
+    digest: sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c
+  resources:
+    requests: {cpu: 50m, memory: 32Mi}
+    limits: {cpu: "1", memory: 256Mi}
+  # Overlays on what the controller generates.
+  # Pod Security restricted: it sets everything but the seccomp profile.
+  deployment:
+    spec:
+      template:
+        spec:
+          securityContext:
+            seccompProfile: {type: RuntimeDefault}
+  # A ClusterIP Service. The default is a LoadBalancer, which on kind is a
+  # NodePort too: the node's port would reach the proxy from the host and
+  # from every container on Docker's kind network (the ml cluster's nodes
+  # among them), past the LLM gateway.
+  service:
+    spec:
+      type: ClusterIP
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: inference-gateway
+  namespace: inference
+spec:
+  gatewayClassName: agentgateway
+  infrastructure:
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: inference-gateway
+  listeners:
+  - name: http
+    port: 8080
+    protocol: HTTP
+    # Routes from this namespace only.
+    allowedRoutes:
+      namespaces: {from: Same}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: local-model
+  namespace: inference
+spec:
+  parentRefs:
+  - name: inference-gateway
+  rules:
+  - matches:
+    - path: {type: PathPrefix, value: /v1/}
+    backendRefs:
+    - group: inference.networking.k8s.io
+      kind: InferencePool
+      name: local-model
+    # The LLM gateway's own upstream timeout is the one that matters; this
+    # only has to be longer.
+    timeouts:
+      request: 300s

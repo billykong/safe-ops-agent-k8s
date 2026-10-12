@@ -13,6 +13,7 @@ Weaknesses we know about, have reproduced, and haven't closed yet. Each has an I
 | [GAP-07](#gap-07-a-long-audit-sink-outage-loses-events-from-the-sink) | A long audit sink outage loses events from the sink | Low (the node's log keeps them, and the drop alerts) | Open | [P4-04](prd/projects/p4-observability-evals.md) |
 | [GAP-08](#gap-08-the-ci-gate-cant-score-a-prompt-or-model-change) | The CI gate can't score a prompt or model change | Medium (a prompt change needs a deliberate re-baseline, but nothing checks it was tested on the real model) | Open | [P4-13](prd/projects/p4-observability-evals.md) |
 | [GAP-09](#gap-09-the-node-can-reach-the-local-model-server) | The node can reach the local model server (the Docker fallback) | Low (needs root on the node or a host-network pod, and then the key) | Open (Docker server only) | [P5-07](prd/projects/p5-local-inference.md) |
+| [GAP-10](#gap-10-the-agentgateway-controller-reads-every-secret) | The agentgateway controller reads every Secret in the cluster | Low (its only egress is the API server; a compromise of it would still hold every Secret) | Open (needs an upstream change) | [P5-05](prd/projects/p5-local-inference.md) |
 
 ## GAP-01: domain fronting through the PyPI egress allowlist
 
@@ -274,4 +275,31 @@ Low. A host-network pod needs a namespace whose Pod Security admits it (the agen
 ### Status
 
 Open, for the Docker server only (P5's fallback). The in-cluster server (P5 M2, the default) doesn't have it: its namespace is default-deny, and on this cluster the node's traffic reaches pods as `world` (P1 README finding 6), so the node's connections are dropped like any other.
+
+## GAP-10: the agentgateway controller reads every Secret
+
+**Found:** 2026-10-13, P5 milestone 3. **Reproduced by:** `kubectl auth can-i list secrets -n gateways --as system:serviceaccount:agentgateway-system:agentgateway` answers `yes`.
+
+### What's wrong
+
+agentgateway's controller (the Gateway API implementation in front of the local model's InferencePool) has `get`, `list` and `watch` on Secrets in every namespace. That includes the LLM gateway's provider key and the approval controller's credentials. Its chart narrows its writes to the Gateway's namespace (`rbac.gatewayNamespaces`), but not its reads.
+
+The controller (v1.6.0) watches Secrets through one cluster-wide informer and drops other namespaces' objects on the client side (`discoveryNamespaceSelectors` sets an object filter). It needs Secrets for TLS and policy references. So the list itself is cluster-wide: removing the permission breaks the informer, and namespaced roles can't replace it.
+
+### Impact
+
+Low. The controller's only egress is the API server (its Cilium policy), and only the inference gateway's proxy may connect to it. Its image is pinned by digest, in a restricted namespace. But anything that ran code in it, or stole its token, could read every Secret in the cluster: that's more than the job needs.
+
+### Options
+
+| Option | Closes it? | Cost |
+| --- | --- | --- |
+| Upstream: namespace-scoped informers when discovery is limited to some namespaces | Yes | An upstream change |
+| The llm-d Router's standalone mode (Envoy beside the picker, no Gateway API controller) | Yes: no controller | Gives up the Gateway API, which is the milestone's point |
+| A ValidatingAdmissionPolicy can't help: reads don't go through admission | No | |
+| Accept: its egress is the API server only, and only the proxy may connect to it | No | None: in place |
+
+### Status
+
+Open. Revisit with each agentgateway release.
 
