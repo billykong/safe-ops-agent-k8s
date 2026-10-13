@@ -2,14 +2,14 @@
 
 ## Target architecture
 
-The end state once all five projects are built. Components marked *(built)* exist today; the rest are planned.
+The architecture as built: every component below exists, in all five projects.
 
 ```mermaid
 flowchart LR
   human(["Human approver"])
 
   subgraph agentns["agent namespace"]
-    agent["Agent loop<br/>(built, scripted)"]
+    agent["Agent loop<br/>(model-driven, Temporal worker)"]
   end
 
   subgraph gw["gateway namespaces"]
@@ -18,13 +18,13 @@ flowchart LR
   end
 
   subgraph sbx["sandboxes namespace"]
-    sandbox["Sandbox pod, gVisor<br/>executor (built)"]
+    sandbox["Sandbox pod, gVisor<br/>executor"]
   end
 
   subgraph ctl["control namespace"]
     cr[("ChangeRequest CRs")]
     controller["Approval controller / executor<br/>no LLM, holds write creds"]
-    policy["Policy engine<br/>OPA (Rego, in the controller), VAP (built)"]
+    policy["Policy engine<br/>OPA (Rego, in the controller), VAP"]
     kill["Kill switch"]
   end
 
@@ -56,9 +56,9 @@ flowchart LR
 | **Sandbox pod** (agent-sandbox `Sandbox` from a `SandboxTemplate`, gVisor) | P1 | Untrusted: runs generated code | Nothing: no SA token, no network, no secrets | Built |
 | **Executor** (HTTP service inside the sandbox) | P1 | Not a boundary: same uid as user code | Nothing | Built |
 | **Warm pool** (`SandboxWarmPool`) | P1 | Infrastructure | Pre-started sandboxes | Built |
-| **Agent loop** | P1-P3 | Semi-trusted: its inputs are attacker-influenced | One workload identity per agent (`runner`, `proposer`); no write credentials; no model key | Built as a scripted Job (P1) and a Temporal worker (P2); LLM loop in P3 |
+| **Agent loop** | P1-P3 | Semi-trusted: its inputs are attacker-influenced | One workload identity per agent (`runner`, `proposer`); no write credentials; no model key | Built as a scripted Job (P1) and a Temporal worker (P2); model-driven through the LLM gateway, reading MCP tools, since P3 M2-M3 |
 | **LLM gateway** | P3 | Trusted | Model API key; token budgets and rate limits | Built (P3 M2); routes the local model to the self-hosted server with that server's key (P5 M1), through the inference gateway since P5 M3 |
-| **MCP / tool gateway** | P3 | Trusted | Tool secrets; per-agent authorisation | Planned |
+| **MCP / tool gateway** | P3 | Trusted | Tool secrets; per-agent authorisation | Built (P3 M3, M5): a static registry in git with per-identity grants, descriptors pinned by hash, and a rule for every tool argument; brokers the tracker's token per call |
 | **Policy engine** (OPA embedded in the approval controller; ValidatingAdmissionPolicy) | P1-P3 | Trusted | Rules: allow, deny, escalate | VAPs for claims, approvals and the agents' writes (P1-P2); the semantic action gate in Rego (P3) |
 | **ChangeRequest CRD + approval controller / executor** | P2 | Trusted, crown jewel | Namespace-scoped write credentials | Built (M1-M4): CRD, controller, agent proposer role, approval policies, write guard, change budget |
 | **Kill switch** | P2 | Trusted | Flag checked by a fail-closed admission policy, plus credential revocation, workflow termination, scale to zero | Built (M4-M5); drilled in the eval suite on every change (P4 M5) |
@@ -95,13 +95,13 @@ The sandbox never protects the cluster from a bad-but-approved change. That's th
 4. The controller re-checks live state against the recorded pre-state, applies with its own scoped credentials, and records pre-state, command and rollback.
 5. The agent's durable workflow (Temporal), which has been waiting on the request, resumes when it completes, even if the agent and Temporal restarted in between.
 
-**Call a tool or the model (P3, planned).** The agent authenticates to the gateway with its workload identity. The gateway applies policy and budgets, injects the secret, and calls the tool or model. The agent never sees the secret.
+**Call a tool or the model (P3, built).** The agent authenticates to the gateway with its workload identity (a pod-bound token for that gateway's audience). The LLM gateway checks the request as data and the identity's token budget; the MCP gateway checks the identity's grants, the tool's pinned descriptor and every argument. The gateway then injects the secret and calls the model or tool. The agent never sees the secret.
 
 ## Environments
 
 | Environment | Used for | Limits |
 | --- | --- | --- |
-| **kind on WSL2** (default) | All projects; CI-like reproducibility | Stock WSL2 kernel lacks `CONFIG_NFT_QUEUE`, `xt_socket` and TPROXY. That forces an eBPF-only Cilium datapath, under which node-originated traffic is classified as `world`. Only gVisor available, not Kata. GPU via `/dev/dxg` may not work with the device plugin |
-| **Bare-metal Linux laptop** | Kata Containers benchmarks; P5 GPU plumbing if WSL2 fails; confirming WSL2 workarounds aren't masking issues | Manual setup |
+| **kind on WSL2** (default) | All projects; CI-like reproducibility | Stock WSL2 kernel lacks `CONFIG_NFT_QUEUE`, `xt_socket` and TPROXY. That forces an eBPF-only Cilium datapath, under which node-originated traffic is classified as `world`. Kata works through nested KVM with Cloud Hypervisor only (no `vhost_vsock` for QEMU; P1 M7). The GPU is `/dev/dxg`; the device plugin works in CDI mode with four workarounds (P5 M2) |
+| **Bare-metal Linux laptop** | Confirming WSL2 workarounds aren't masking issues; bare-metal Kata numbers. Not needed so far: Kata and the GPU both work on WSL2 | Manual setup; not yet used |
 
 Current stack: kind v0.33 (Kubernetes 1.37), containerd 2.3, Cilium 1.20 (kube-proxy replacement, BPF masquerade, no iptables), gVisor `runsc`, agent-sandbox v1.0.4. Setup gotchas are recorded in [P1 findings](../../projects/01-sandboxed-code-exec/README.md#findings-so-far).

@@ -40,15 +40,15 @@ Reference documents (read 2026-09-29):
 
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
-| SEC-10 | Guardrail webhooks fail closed (`failurePolicy: Fail`) for the agent's identity, scoped with `matchConditions` so an outage blocks the agent, not the cluster. | Must | **Partial**: set on the claim policy (built-in VAP, no webhook to fail); webhook outage test planned (P2) |
-| SEC-11 | The kill switch flips a flag checked by a fail-closed webhook, **and** revokes the agent's credentials, cancels in-flight workflows, and scales the agent to zero. It is tested as part of the evals. | Must | **Done** in P2 as a ValidatingAdmissionPolicy (no webhook to fail) plus `scripts/kill-switch.sh`, which also terminates in-flight Temporal workflows: `make test-kill-switch`, `make test-durable`. Joins the eval suite in P4 |
+| SEC-10 | Guardrail webhooks fail closed (`failurePolicy: Fail`) for the agent's identity, scoped with `matchConditions` so an outage blocks the agent, not the cluster. | Must | **Done** with ValidatingAdmissionPolicies instead of webhooks: every guard (claims, approvals, the write guard, the kill switch, verdict authority, GPU and pool admission) runs in the API server with `failurePolicy: Fail`, so there's no webhook to be down. The agent's guards are scoped to its identities and surfaces with `matchConditions` and bindings, so a failure blocks the agent, not the cluster. A missing kill-switch flag stops only the agent's surfaces (`make test-kill-switch`); a policy error denies the agent rather than admitting it (P2 README finding 6) |
+| SEC-11 | The kill switch flips a flag checked by a fail-closed webhook, **and** revokes the agent's credentials, cancels in-flight workflows, and scales the agent to zero. It is tested as part of the evals. | Must | **Done** in P2 as a ValidatingAdmissionPolicy (no webhook to fail) plus `scripts/kill-switch.sh`, which also terminates in-flight Temporal workflows: `make test-kill-switch`, `make test-durable`. Drilled in the eval suite, in CI after the regression gate (P4-14, `make eval-kill-switch`) |
 | SEC-12 | If the model API is down, the system degrades to "escalate everything", never to "act without the model's checks". | Should | **Done**: `make test-llm-gateway` (model unavailable, refused, out of budget or invalid output: the agent escalates and proposes nothing) |
 
 ### Human oversight
 
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
-| SEC-20 | The approval view leads with a deterministic diff, blast radius and policy findings. The model's rationale is secondary and labelled as model-generated. | Must | Planned (P2) |
+| SEC-20 | The approval view leads with a deterministic diff, blast radius and policy findings. The model's rationale is secondary and labelled as model-generated. | Must | **Done** (P2-40): `make test-review` (the controller's dry run, field diff, blast radius, findings and rollback check come first in `approvalctl show`; the agent's account last, labelled unverified; approving a Critical finding needs `--accept-critical`) |
 | SEC-21 | Oversight is measured: approval rate, time to approve, override/reject counts, and catch rate on seeded known-bad proposals. | Should | **Done**: approval rate, time to decide, rejections and approvals of flagged requests per approver (`approvalctl stats`, controller metrics; `make test-review`); catch rate on seeded known-bad proposals, automated and per approver, never applied (P4-15, `make test-seeded`) |
 | SEC-22 | Agent-written runbooks, memory and summaries are untrusted until merged through human-reviewed PRs with provenance. | Should | Planned |
 
@@ -56,15 +56,15 @@ Reference documents (read 2026-09-29):
 
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
-| SEC-30 | Images are digest-pinned (no `:latest`), signed with cosign, and verified at admission (Kyverno `verifyImages`). | Should | **Gap**: images are local `:dev` tags and `python:3.13-slim` by tag |
-| SEC-31 | SBOM (Syft) and an AI-BOM listing each model, prompt, tool and MCP server with version and hash. | Should | Planned |
-| SEC-32 | MCP servers pinned by digest; tool descriptors pinned by hash (detects "rug pull"); no dynamic tool discovery; system prompts in git. | Should | Planned (P3) |
-| SEC-33 | Pod Security Admission `restricted` on agent and sandbox namespaces; read-only rootfs, non-root, dropped capabilities, seccomp `RuntimeDefault`. | Must | **Partial**: namespace labels set; pod settings checked by `make verify`; PSA rejection not tested |
-| SEC-34 | `ResourceQuota`/`LimitRange` and caps on concurrent sandboxes and warm-pool size. | Should | **Partial**: per-pod limits and pids limit done; quotas planned |
-| SEC-35 | Mutual authentication between components (Cilium mutual auth or a mesh). | Could | Planned (P3) |
+| SEC-30 | Images are digest-pinned (no `:latest`), signed with cosign, and verified at admission (Kyverno `verifyImages`). | Should | **Gap**: our images are local `:dev` tags on bases referenced by tag (`python:3.13-slim`, distroless), and nothing is signed or verified at admission. Pinned by digest: the vLLM base, the DCGM exporter and the NVIDIA CDI hook (P5) |
+| SEC-31 | SBOM (Syft) and an AI-BOM listing each model, prompt, tool and MCP server with version and hash. | Should | **Partial**: AI-BOM done (P3-23, `scripts/ai-bom.sh`: models, prompt hash, tool descriptor hashes, MCP grants and argument rules, running image digests); no SBOM yet |
+| SEC-32 | MCP servers pinned by digest; tool descriptors pinned by hash (detects "rug pull"); no dynamic tool discovery; system prompts in git. | Should | **Partial** (P3-20, P3-21, P3-22): descriptors pinned by hash and checked on every list and call (rug pull caught, `make test-mcp`); no discovery; system prompt and registry in git. MCP server images are local tags, not digests |
+| SEC-33 | Pod Security Admission `restricted` on agent and sandbox namespaces; read-only rootfs, non-root, dropped capabilities, seccomp `RuntimeDefault`. | Must | **Done**: enforcement tested in `sandboxes` and `agent` (`make test-pod-security`, P1-04: non-compliant pods denied by PodSecurity itself); pod settings checked by `make verify` |
+| SEC-34 | `ResourceQuota`/`LimitRange` and caps on concurrent sandboxes and warm-pool size. | Should | **Partial**: per-pod limits, executor RLIMITs and a node pids limit done; ResourceQuota and caps on concurrent sandboxes and pool size planned (P1-23) |
+| SEC-35 | Mutual authentication between components (Cilium mutual auth or a mesh). | Could | Planned: P3-24; agents authenticate to the gateways, not the reverse, over plaintext ([GAP-04](../known-gaps.md#gap-04-agent-to-gateway-traffic-is-plaintext)) |
 | SEC-36 | Kubernetes API audit logging captures the agent's identity, shipped to a store the agent can't write or delete. | Should | **Done** in P4 M2: the agent's requests (with pod and token id) and changes to guard configuration, over mTLS to a hash-chained sink in namespace `audit` and a root-only node log; tampering and admission changes alert: `make test-audit`. Outage limit: GAP-07 |
 | SEC-37 | Trace content capture (prompts, tool outputs) off or redacted by default. | Should | **Done** in P4 M1: no sender records content, and the collector deletes any span attribute not on its allowlist: `make test-observability` |
-| SEC-38 | Each `ChangeRequest` carries a declared scope (namespaces, kinds); policy rejects actions outside it even if approved. | Should | **Done** in the controller: `make test-approval`; a policy engine joins in P3 |
+| SEC-38 | Each `ChangeRequest` carries a declared scope (namespaces, kinds); policy rejects actions outside it even if approved. | Should | **Done** in the controller: `make test-approval`; the semantic action gate (P3-10) adds deny rules on the change's effect (`make test-policy`) |
 | SEC-39 | GPU access never via `privileged: true`; the untrusted-code sandbox never gets a GPU; NVIDIA Container Toolkit kept patched. | Must | Done (P5 M2): the model server is a restricted pod with the GPU as a CDI device; admission keeps GPU requests to namespace `inference`; the toolkit's CDI hook is pinned. The device plugin is privileged, alone in `gpu-system`. Since M3 the GPU is time-sliced, with no memory isolation between the sharers; admission keeps them to `inference`. Since M4 the third slice is the DCGM metrics exporter's, also a restricted pod: no privileged GPU monitor |
 
 ## Governance artefacts
@@ -74,12 +74,12 @@ To be kept under `docs/` as the projects land.
 | Artefact | NIST AI RMF anchor | Status |
 | --- | --- | --- |
 | Threat model mapping each OWASP ASI risk to a control or an accepted residual risk | MAP 4, MANAGE 1.3-1.4 | Summary above; full version planned |
-| Inventory / AI-BOM of models, prompts, tools and MCP servers | GOVERN 1.6, MAP 4.2 | Planned (P3) |
+| Inventory / AI-BOM of models, prompts, tools and MCP servers | GOVERN 1.6, MAP 4.2 | **Done** (P3-23): `scripts/ai-bom.sh`, `projects/03-tool-access/results/ai-bom.md` |
 | Human oversight design: what needs approval, who approves, oversight metrics | MAP 3.5, GOVERN 3.2, MEASURE 2.8 | **Done** (P2): everything needs approval except what the change budget pays for; approvers are certificate-authenticated members of `safe-ops:approvers`; packet and metrics computed by code (`make test-review`) |
 | Kill-switch / deactivation and decommission runbook, tested | MANAGE 2.4, GOVERN 1.7 | **Done**: `docs/runbooks/kill-switch.md`, `make test-kill-switch` |
-| Red-team plan, cadence and results log | MEASURE 2.7, MANAGE 4.1 | Planned (P1 M4, P3) |
-| Incident / near-miss log and change log | MANAGE 4.3, GOVERN 4.3 | Partial: P1 findings log |
-| Third-party failure plan (model API down: escalate everything) | GOVERN 6.2, MANAGE 3.1 | Planned (P3) |
+| Red-team plan, cadence and results log | MEASURE 2.7, MANAGE 4.1 | **Done** (P3-32): [red-team.md](../red-team.md) (plan, catalogue, cadence), [red-team-log.md](../red-team-log.md); attack demos in P1 `results/` |
+| Incident / near-miss log and change log | MANAGE 4.3, GOVERN 4.3 | Partial: a findings log in each project's README and the [known gaps](../known-gaps.md) register; no incident log yet |
+| Third-party failure plan (model API down: escalate everything) | GOVERN 6.2, MANAGE 3.1 | **Done** (SEC-12, P3-06): model unavailable, refused, out of budget or invalid output escalates and proposes nothing (`make test-llm-gateway`) |
 
 ## Residual risks (stated openly)
 
@@ -90,7 +90,7 @@ To be kept under `docs/` as the projects land.
 - **WSL2 networking workarounds.** The eBPF-only Cilium datapath means node-originated traffic is classified as `world`; default-deny namespaces use `exec` probes. Cilium's DNS proxy and Envoy run non-transparent, so upstreams (CoreDNS, PyPI) see the node's address, not the pod's; Hubble keeps per-pod attribution. Results should be re-confirmed on bare metal.
 - **A sandbox can be crashed by its own code.** Memory spread across processes, each under the per-process cap, exceeds the pod limit and kills that sandbox. It's contained (other sandboxes and the node are unaffected), but the task's sandbox is lost; the agent sees a transport error and must release and retry.
 - **gVisor ignores the pod pids limit.** Fork-bomb protection inside sandboxes depends on the executor setting `RLIMIT_NPROC` on user code. Code reaching the sandbox by another path (e.g. `kubectl exec`) isn't covered.
-- **Allowlisted egress is by IP, and CDNs share IPs.** The SNI pin stops reaching other sites by name, but domain fronting (allowed SNI, another site's `Host` header) still reaches any customer of the same CDN, so a sandbox with PyPI egress can send data to an attacker's Fastly service ([GAP-01](../known-gaps.md#gap-01-domain-fronting-through-the-pypi-egress-allowlist)). Mitigation planned: a package mirror or egress proxy as the only destination.
+- **Allowlisted egress is by IP, and CDNs share IPs.** The SNI pin stops reaching other sites by name, but domain fronting (allowed SNI, another site's `Host` header) still reaches any customer of the same CDN, so a sandbox with PyPI egress can send data to an attacker's Fastly service ([GAP-01](../known-gaps.md#gap-01-domain-fronting-through-the-pypi-egress-allowlist)). Mitigation planned, not yet built: a package mirror or egress proxy as the only destination.
 - **Admission controls can't protect themselves.** Kubernetes doesn't run admission policies or webhooks on admission configuration, so an identity with RBAC on `admissionregistration.k8s.io` (or `impersonate`, `escalate`, `bind`) can remove the guards. The agent's RBAC excludes these and the suites check it ([GAP-02](../known-gaps.md#gap-02-admission-guards-cant-protect-their-own-configuration)).
 - **The executor is not a boundary.** User code in the sandbox can kill or tamper with the executor; isolation relies on gVisor, the pod spec and NetworkPolicy.
 

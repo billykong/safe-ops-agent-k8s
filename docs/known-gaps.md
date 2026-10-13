@@ -55,7 +55,7 @@ Without the SNI pin, even plain HTTPS by name to those sites worked through PyPI
 | **Pre-built images or wheels** for known dependencies, so most tasks need no egress | Avoids it for those tasks | Image rebuilds per dependency set |
 | Keep the allowlist minimal and egress pools small | Narrows it, doesn't close it | — |
 
-**Planned:** the mirror/proxy, with P3's gateway. Until then, treat the pypi pool as able to reach Fastly.
+**Planned:** the mirror/proxy (not built in P3). Until then, treat the pypi pool as able to reach Fastly.
 
 ### Status
 
