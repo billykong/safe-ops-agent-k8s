@@ -266,6 +266,11 @@ func printPacket(out *os.File, cr *v1.ChangeRequest, budget string) {
 	if g := st.BudgetGrant; g != nil {
 		row("decision", fmt.Sprintf("approved by change budget %s at %s (no human)", g.Budget, g.Time.UTC().Format(time.RFC3339)))
 	}
+	// Shown only once it's final: the controller writes it then (P4-15).
+	if sd := st.Seeded; sd != nil {
+		row("seeded test", fmt.Sprintf("a known-%s proposal (expected: %s): %s", map[bool]string{true: "bad", false: "good"}[sd.Expected == v1.DecisionRejected], sd.Expected, sd.Reason))
+		more(fmt.Sprintf("automated review: %s; human: %s %s", sd.Automated, sd.Human, sd.Approver))
+	}
 	fmt.Fprintln(w, "\t")
 	row("PROPOSER'S ACCOUNT", "(free text from the agent, not verified: weigh it last)")
 	row("intent", s.Intent)
@@ -319,17 +324,31 @@ func stats(ctx context.Context, c client.Client, ns string) {
 		reopen = fmt.Sprintf("%.0f%%", 100*float64(r.Reopened)/float64(r.Applied))
 	}
 	fmt.Printf("applied: %d, reopened within %s: %d (%s)\n", r.Applied, oversight.ReopenWindow, r.Reopened, reopen)
-	fmt.Printf("time to decision: humans median %s, p90 %s; change budget median %s\n\n",
+	fmt.Printf("time to decision: humans median %s, p90 %s; change budget median %s\n",
 		dur(oversight.Quantile(r.HumanSeconds, 0.5)), dur(oversight.Quantile(r.HumanSeconds, 0.9)), dur(oversight.Quantile(r.BudgetSeconds, 0.5)))
+	pct := func(v float64) string {
+		if math.IsNaN(v) {
+			return "-"
+		}
+		return fmt.Sprintf("%.0f%%", 100*v)
+	}
+	sa := r.SeededAutomated
+	fmt.Printf("seeded test proposals (P4-15): automated review caught %d of %d known-bad (%s), %d false alarms on known-good; %d withheld\n\n",
+		sa[v1.SeedCaught], sa[v1.SeedCaught]+sa[v1.SeedMissed], pct(oversight.CatchRate(sa)), sa[v1.SeedFalseAlarm], r.Withheld)
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "APPROVER\tAPPROVED\tREJECTED\tAPPROVAL RATE\tMEDIAN TIME\tP90 TIME\tAPPROVED FLAGGED\tAPPROVED CRITICAL")
+	fmt.Fprintln(w, "APPROVER\tAPPROVED\tREJECTED\tAPPROVAL RATE\tMEDIAN TIME\tP90 TIME\tAPPROVED FLAGGED\tAPPROVED CRITICAL\tSEEDED CAUGHT")
 	for _, a := range r.Approvers {
 		rate := "-"
 		if v := a.ApprovalRate(); !math.IsNaN(v) {
 			rate = fmt.Sprintf("%.0f%%", 100*v)
 		}
-		fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%s\t%d\t%d\n", a.Name, a.Approved, a.Rejected, rate,
-			dur(oversight.Quantile(a.Seconds, 0.5)), dur(oversight.Quantile(a.Seconds, 0.9)), a.ApprovedFlagged, a.ApprovedCritical)
+		so := r.SeededHuman[a.Name]
+		seeded := "-"
+		if n := so[v1.SeedCaught] + so[v1.SeedMissed]; n > 0 {
+			seeded = fmt.Sprintf("%d of %d (%s)", so[v1.SeedCaught], n, pct(oversight.CatchRate(so)))
+		}
+		fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%s\t%d\t%d\t%s\n", a.Name, a.Approved, a.Rejected, rate,
+			dur(oversight.Quantile(a.Seconds, 0.5)), dur(oversight.Quantile(a.Seconds, 0.9)), a.ApprovedFlagged, a.ApprovedCritical, seeded)
 	}
 	die(w.Flush())
 }

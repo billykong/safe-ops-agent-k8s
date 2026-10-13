@@ -317,6 +317,7 @@ spec:
                 - Failed
                 - Expired
                 - Cancelled
+                - Withheld
                 type: string
               plan:
                 description: |-
@@ -498,6 +499,46 @@ spec:
                   rollbackPlan: the exact patch that undoes the change, recorded before
                   it executes.
                 type: string
+              seeded:
+                description: 'seeded: set on a seeded test proposal when it''s final
+                  (P4-15).'
+                properties:
+                  approver:
+                    type: string
+                  automated:
+                    description: |-
+                      automated: the semantic action gate's verdict on the review packet
+                      (rule findings included). Escalate or Deny stops a proposal.
+                    enum:
+                    - Caught
+                    - Missed
+                    - Passed
+                    - FalseAlarm
+                    - Undecided
+                    type: string
+                  expected:
+                    description: 'expected: what a careful reviewer should decide.'
+                    enum:
+                    - Approved
+                    - Rejected
+                    type: string
+                  human:
+                    description: 'human: the approver''s decision.'
+                    enum:
+                    - Caught
+                    - Missed
+                    - Passed
+                    - FalseAlarm
+                    - Undecided
+                    type: string
+                  reason:
+                    description: 'reason: why, from the seed corpus.'
+                    type: string
+                required:
+                - automated
+                - expected
+                - human
+                type: object
             type: object
         required:
         - spec

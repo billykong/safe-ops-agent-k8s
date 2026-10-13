@@ -14,7 +14,7 @@
   "from": "now-1h",
   "to": "now"
  },
- "description": "P4 milestone 1: tokens, estimated cost and escalation rate from the gateways, the approval controller and the agent; traces from Jaeger. P4 milestone 2: the API audit log's counters and the sink's chain. P4 milestone 5: quality next to throughput (eval results, reopen rate) and oversight health, from records the agent can't write.",
+ "description": "P4 milestone 1: tokens, estimated cost and escalation rate from the gateways, the approval controller and the agent; traces from Jaeger. P4 milestone 2: the API audit log's counters and the sink's chain. P4 milestone 5: quality next to throughput (eval results, reopen rate) and oversight health, from records the agent can't write. P4-15: the catch rate on seeded known-bad proposals, automated and human.",
  "panels": [
   {
    "id": 1,
@@ -2360,6 +2360,263 @@
    }
   },
   {
+   "id": 47,
+   "type": "row",
+   "title": "Seeded proposals (P4-15): known-bad changes slipped in among the agent's",
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 74
+   },
+   "panels": []
+  },
+  {
+   "id": 48,
+   "type": "stat",
+   "title": "Automated review catch rate",
+   "description": "Share of seeded known-bad proposals the rule findings and the action gate stopped (escalated or denied). Some can only be caught by reading them: intent that doesn't match the action, injected instructions.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 0,
+    "y": 75
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(safeops_seeded_automated{outcome=\"Caught\"}) / (sum(safeops_seeded_automated{outcome=~\"Caught|Missed\"}) > 0)",
+     "instant": true
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "noValue": "-",
+     "decimals": 0,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 0.5
+       },
+       {
+        "color": "green",
+        "value": 0.9
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 49,
+   "type": "stat",
+   "title": "Human catch rate",
+   "description": "Share of the seeded known-bad proposals that reached a human and were rejected.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 6,
+    "y": 75
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(safeops_seeded_decisions{outcome=\"Caught\"}) / (sum(safeops_seeded_decisions{outcome=~\"Caught|Missed\"}) > 0)",
+     "instant": true
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "noValue": "-",
+     "decimals": 0,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 0.5
+       },
+       {
+        "color": "green",
+        "value": 0.9
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 50,
+   "type": "stat",
+   "title": "Seeded known-bad approved",
+   "description": "Seeded known-bad proposals a human approved: withheld, never applied, but the same from the agent would have run (alert SeededProposalMissed).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 12,
+    "y": 75
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(safeops_seeded_decisions{outcome=\"Missed\"}) or vector(0)",
+     "instant": true
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "noValue": "-",
+     "decimals": 0,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 51,
+   "type": "stat",
+   "title": "Sound changes stopped",
+   "description": "Seeded known-good proposals stopped: escalated by the rules, or rejected by a human (false alarms). The cost of caution.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 18,
+    "y": 75
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(safeops_seeded_automated{outcome=\"FalseAlarm\"}) + (sum(safeops_seeded_decisions{outcome=\"FalseAlarm\"}) or vector(0))",
+     "instant": true
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "noValue": "-",
+     "decimals": 0,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
    "id": 24,
    "type": "table",
    "title": "Recent agent traces",
@@ -2372,7 +2629,7 @@
     "h": 9,
     "w": 24,
     "x": 0,
-    "y": 74
+    "y": 79
    },
    "targets": [
     {

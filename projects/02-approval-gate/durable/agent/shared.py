@@ -4,8 +4,9 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 TASK_QUEUE = "agent"
-# ChangeRequest phases after which nothing more will happen.
-FINAL_PHASES = ("Applied", "Rejected", "Failed", "Expired", "Cancelled")
+# ChangeRequest phases after which nothing more will happen. Withheld: a
+# seeded test proposal (P4-15), never one of the agent's own.
+FINAL_PHASES = ("Applied", "Rejected", "Failed", "Expired", "Cancelled", "Withheld")
 
 
 @dataclass

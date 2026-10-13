@@ -139,6 +139,9 @@ check "... one series per scenario" "^$TOTAL.0$" "$(prom "count(safeops_eval_sce
 check "the controller may read EvalRuns, not write them" '^yes no no$' \
   "$(for v in list create delete; do kubectl auth can-i $v evalruns.evals.safe-ops.io -n evals --as=$CTRL 2>/dev/null || true; done | tr '\n' ' ' | sed 's/ $//')"
 
+# A suite run just before may have deleted its requests on exit: let a
+# scrape (15s) see that before taking the "before" figures.
+sleep 20
 A0=$(prom 'max(safeops_changerequests_applied)'); A0=${A0%.0}
 R0=$(prom 'max(safeops_changerequests_reopened)'); R0=${R0%.0}
 [ "$A0" = none ] && A0=0; [ "$R0" = none ] && R0=0

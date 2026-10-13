@@ -11,7 +11,7 @@ Requirements and status: [docs/prd/projects/p2-approval-gate.md](../../docs/prd/
 3. [x] Admission guard rejecting direct writes by the agent's identity (a ValidatingAdmissionPolicy). `make test-agent-guard`: 50 checks (33 at the time; per-identity checks added in P3)
 4. [x] Change budget and kill switch, with a runbook. `make test-budget`: 32 checks; `make test-kill-switch`: 43 checks
 5. [x] Durable execution across long approvals, with Temporal; pod-restart demo. `make durable test-durable`: 40 checks
-6. [x] Computed review packet and oversight metrics. `make test-review`: 38 checks
+6. [x] Computed review packet and oversight metrics. `make test-review`: 40 checks
 
 ## How it works
 
@@ -56,6 +56,7 @@ sequenceDiagram
   - a **rollback check**: the rollback patch applied to the dry run's result must restore every reviewed field of the pre-state.
   The packet is covered by the review hash, so an approval binds to it, and only the controller may write it. The same state always gives the same packet. `approvalctl show` adds the change budget's remaining capacity, and labels the agent's blast radius and rollback as claimed. Approving a request with a Critical finding needs `--accept-critical`. The change budget pays only for requests the semantic action gate allows (P2-44; since P3 milestone 4 the gate is `policy/gate.rego`, which escalates any Warning or Critical finding and denies some changes outright: see `../03-tool-access/README.md`).
 - **Oversight metrics** (`internal/oversight`, P2-42). Recomputed from the ChangeRequests on every call, never counted in memory: per approver, approvals, rejections, approval rate, time from proposal to decision (median, p90), and approvals of requests with Warning or Critical findings (a rubber-stamping signal); overall, outcomes by what settled them (humans, change budget, controller, expiry, kill switch) and re-proposals after drift. `approvalctl stats` prints them. The controller exports them as Prometheus metrics (`safeops_approver_decisions`, `safeops_approver_approvals_flagged`, `safeops_changerequest_time_to_decision_seconds`, `safeops_changerequest_outcomes`, ...) on :8443 over HTTPS, each scrape authenticated and authorized by the API server (P4: only Prometheus's identity may read them, and only Prometheus can connect). The controller records `proposedAt`, `decidedAt` and the proposal count for this. P4 milestone 5 added each approver's median and p90 time to decide (`safeops_approver_decision_seconds`), the reopen rate (`safeops_changerequests_reopened`: an applied change followed within an hour by another proposal for the same target) and the latest eval run (`safeops_eval_*`, read from P4's EvalRuns), with alerts on them in P4's Prometheus.
+- **Seeded test proposals** (`internal/controller/seeded.go`, P2-43 / P4-15). Proposals the seeder slips in among the agent's, listed in a seed key (ConfigMap `approval-system/seeded-proposals`) that approvers and the agent can't read. The controller reviews them like any other and never applies one: an approval, or a change budget that would pay, ends it `Withheld`. Once final it records `status.seeded`, how the automated review and the human did; the oversight metrics turn that into catch rates. Details in [P4's README](../04-observability/README.md#seeded-known-bad-proposals-p4-15).
 - **Time of check vs time of use.** Before applying, the controller compares the target's live state with the recorded pre-state. If anything changed (any spec edit bumps the generation), it clears the approval, re-proposes from live state, and waits in `NeedsReapproval`.
 - **Scope.** An action outside its declared scope is rejected, and a later approval doesn't revive it.
 - **Backstop on the agent's writes** (`manifests/80-agent-write-guard.yaml`). A ValidatingAdmissionPolicy matched only to the agent's identity refuses every create, update, delete or connect (exec included) outside an allowlist: create/delete SandboxClaims in `sandboxes`, create ChangeRequests in `approvals`, and self-review calls. It fails closed. If the agent's RBAC is ever widened by mistake, it still can't change the cluster except by proposing. A policy rather than a webhook: same admission point, but evaluated in the API server, with no TLS or extra service to fail. It can't protect admission configuration itself ([GAP-02](../../docs/known-gaps.md#gap-02-admission-guards-cant-protect-their-own-configuration)).
@@ -103,7 +104,6 @@ sequenceDiagram
 24. **Two check counts were reported wrong.** The kill-switch suite had 42 checks, not 46 (milestone 4), and the budget suite 31, then 32, not 33 and 34 (milestones 4 and 6). They were added up by hand instead of counted. Counts in this README now come from the PASS lines of a run.
 
 ## Not yet
-- Seeded known-bad proposals to measure approvers' catch rate (P2-43): P4's eval suite.
 - Rollback is a new proposal of the inverse action; there's no one-step "roll back request X" action.
 - Metrics aren't scraped yet (P4).
 
@@ -122,7 +122,7 @@ make test-budget                        # 32 checks; creates and removes a Chang
 make test-kill-switch                   # 43 checks; stops a running agent, resumes, leaves mode=run
 make durable                            # Temporal and the agent worker
 make test-durable                       # 40 checks; restarts both mid-approval
-make test-review                        # 38 checks; review packet, overrides, oversight metrics, rollback
+make test-review                        # 40 checks; review packet, overrides, oversight metrics, rollback
 projects/02-approval-gate/bin/approvalctl stats
 ./scripts/kill-switch.sh status         # stop --reason TEXT | resume --reason TEXT
 ./scripts/new-approver.sh alice         # writes ~/.kube/safe-ops-approver-alice.kubeconfig

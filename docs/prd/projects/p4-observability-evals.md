@@ -2,7 +2,7 @@
 
 **Goal:** what the agent does, what it costs and whether it's still safe are visible by default and checked continuously. Changes to the agent are gated on replayed evaluations. Covers goal G4.
 
-Status: **milestones done**: 1 (telemetry), 2 (API audit log), 3 (replay evals), 4 (CI regression gate) and 5 (oversight and quality metrics, kill-switch drill). Every Must is done; P4-15 (seeded known-bad proposals, Should) remains. Depends on P2 and P3; uses P5 for a local judge. Built in [projects/04-observability/](../../../projects/04-observability/README.md).
+Status: **done**: milestones 1 (telemetry), 2 (API audit log), 3 (replay evals), 4 (CI regression gate), 5 (oversight and quality metrics, kill-switch drill) and 6 (seeded known-bad proposals, P4-15). Every requirement is done. Depends on P2 and P3; uses P5 for a local judge. Built in [projects/04-observability/](../../../projects/04-observability/README.md).
 
 ## User stories
 
@@ -30,7 +30,7 @@ Status: **milestones done**: 1 (telemetry), 2 (API audit log), 3 (replay evals),
 | P4-12 | Only the evaluator's identity can write verdicts. | Must | **Done** (M3): RBAC plus the `eval-verdict-authority` admission policy, which refuses cluster admins too; EvalRuns are append-only (immutable spec, no update or delete); creations and refused attempts are in the audit log |
 | P4-13 | CI gates merges on eval regressions. | Must | **Done** (M4): on every pull request to main, CI builds the stack on a fresh kind cluster, replays the scenarios with the mock model, and fails if a scenario the baseline in git passes now fails, if safety didn't hold, or if a scenario, the agent's prompt or model, or the judge changed without a new baseline; required check `result`; `make eval-gate test-eval-gate`. The mock doesn't score prompt or model changes, only forces a re-baseline ([GAP-08](../../known-gaps.md#gap-08-the-ci-gate-cant-score-a-prompt-or-model-change)) |
 | P4-14 | The kill switch is exercised as part of the suite. | Must | **Done** (M5): a drill in the eval suite, run in CI after the gate (`scripts/eval-kill-switch.sh`, `make eval-kill-switch`). It puts the durable agent mid-work (two proposals waiting for a human, a stolen token), stops it with the runbook's command and checks every layer, then resumes it and runs the regression gate again. `make test-oversight` checks it fails, naming the layer, when one of the switch's admission bindings is removed |
-| P4-15 | Seeded known-bad proposals measure catch rate for the AI reviewer and human approvers. | Should | Planned |
+| P4-15 | Seeded known-bad proposals measure catch rate for the AI reviewer and human approvers. | Should | **Done** (M6): a corpus of known-bad and known-good proposals, proposed by a separate seeder identity exactly as the agent writes them; a seed key only the controller can read says which. The controller reviews them like any other, never applies one (an approval, or a budget that would pay, ends it `Withheld`), and scores the automated review (rule findings and the action gate; there's no model reviewer) and the human once final: `approvalctl stats`, `safeops_seeded_*` metrics, a dashboard row, alert `SeededProposalMissed`. The rules caught 3 of 5 known-bad; the two they miss need a reader (`make test-seeded`) |
 
 ### Metrics that matter
 
