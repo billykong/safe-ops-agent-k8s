@@ -82,6 +82,7 @@ spec:
         oldObject.?status.?reviewHash == object.?status.?reviewHash &&
         oldObject.?status.?expiresAt == object.?status.?expiresAt &&
         oldObject.?status.?appliedAt == object.?status.?appliedAt &&
+        oldObject.?status.?seeded == object.?status.?seeded &&
         oldObject.?status.?budgetGrant == object.?status.?budgetGrant &&
         oldObject.?status.?review == object.?status.?review &&
         oldObject.?status.?proposedAt == object.?status.?proposedAt &&

@@ -49,7 +49,7 @@ Reference documents (read 2026-09-29):
 | ID | Requirement | Priority | Status |
 | --- | --- | --- | --- |
 | SEC-20 | The approval view leads with a deterministic diff, blast radius and policy findings. The model's rationale is secondary and labelled as model-generated. | Must | Planned (P2) |
-| SEC-21 | Oversight is measured: approval rate, time to approve, override/reject counts, and catch rate on seeded known-bad proposals. | Should | **Partial**: approval rate, time to decide, rejections and approvals of flagged requests per approver (`approvalctl stats`, controller metrics; `make test-review`). Seeded known-bad proposals in P4 |
+| SEC-21 | Oversight is measured: approval rate, time to approve, override/reject counts, and catch rate on seeded known-bad proposals. | Should | **Done**: approval rate, time to decide, rejections and approvals of flagged requests per approver (`approvalctl stats`, controller metrics; `make test-review`); catch rate on seeded known-bad proposals, automated and per approver, never applied (P4-15, `make test-seeded`) |
 | SEC-22 | Agent-written runbooks, memory and summaries are untrusted until merged through human-reviewed PRs with provenance. | Should | Planned |
 
 ### Supply chain and platform hardening

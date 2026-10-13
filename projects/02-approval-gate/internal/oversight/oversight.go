@@ -54,6 +54,22 @@ type Report struct {
 	Approvers         []Approver
 	// HumanSeconds and BudgetSeconds: proposal-to-decision times.
 	HumanSeconds, BudgetSeconds []float64
+	// Seeded test proposals (P4-15), final ones only: the automated
+	// review's outcomes, and each approver's.
+	SeededAutomated map[v1.SeedOutcome]int
+	SeededHuman     map[string]map[v1.SeedOutcome]int
+	// Withheld: seeded proposals approved (or budget-eligible), never applied.
+	Withheld int
+}
+
+// CatchRate is caught / (caught + missed): the share of known-bad seeded
+// proposals stopped. NaN with none decided.
+func CatchRate(o map[v1.SeedOutcome]int) float64 {
+	n := o[v1.SeedCaught] + o[v1.SeedMissed]
+	if n == 0 {
+		return math.NaN()
+	}
+	return float64(o[v1.SeedCaught]) / float64(n)
 }
 
 // ReopenWindow: how soon after an apply another proposal for the same
@@ -61,11 +77,11 @@ type Report struct {
 const ReopenWindow = time.Hour
 
 var final = map[v1.Phase]bool{v1.PhaseApplied: true, v1.PhaseRejected: true, v1.PhaseFailed: true,
-	v1.PhaseExpired: true, v1.PhaseCancelled: true}
+	v1.PhaseExpired: true, v1.PhaseCancelled: true, v1.PhaseWithheld: true}
 
 // Compute builds the report.
 func Compute(items []v1.ChangeRequest) Report {
-	r := Report{ByPhase: map[v1.Phase]int{}}
+	r := Report{ByPhase: map[v1.Phase]int{}, SeededAutomated: map[v1.SeedOutcome]int{}, SeededHuman: map[string]map[v1.SeedOutcome]int{}}
 	byName := map[string]*Approver{}
 	proposed := map[v1.TargetRef][]time.Time{}
 	for i := range items {
@@ -90,6 +106,18 @@ func Compute(items []v1.ChangeRequest) Report {
 		}
 		if !final[st.Phase] {
 			continue
+		}
+		if st.Phase == v1.PhaseWithheld {
+			r.Withheld++
+		}
+		if sr := st.Seeded; sr != nil {
+			r.SeededAutomated[sr.Automated]++
+			if sr.Approver != "" {
+				if r.SeededHuman[sr.Approver] == nil {
+					r.SeededHuman[sr.Approver] = map[v1.SeedOutcome]int{}
+				}
+				r.SeededHuman[sr.Approver][sr.Human]++
+			}
 		}
 		secs := math.NaN()
 		if st.ProposedAt != nil && st.DecidedAt != nil {
@@ -189,7 +217,7 @@ type Collector struct {
 
 	requests, decisions, flagged, reproposed, outcomes *prometheus.Desc
 	applied, reopened, approverSeconds                 *prometheus.Desc
-	timeToDecision                                     *prometheus.Desc
+	timeToDecision, seededAutomated, seededHuman       *prometheus.Desc
 }
 
 func NewCollector(list func(context.Context) ([]v1.ChangeRequest, error)) *Collector {
@@ -215,12 +243,16 @@ func NewCollector(list func(context.Context) ([]v1.ChangeRequest, error)) *Colle
 			[]string{"approver", "quantile"}, nil),
 		timeToDecision: prometheus.NewDesc("safeops_changerequest_time_to_decision_seconds",
 			"Seconds from proposal to decision.", []string{"decided_by"}, nil),
+		seededAutomated: prometheus.NewDesc("safeops_seeded_automated",
+			"Final seeded test proposals by the automated review's outcome (P4-15).", []string{"outcome"}, nil),
+		seededHuman: prometheus.NewDesc("safeops_seeded_decisions",
+			"Seeded test proposals an approver decided, by outcome (P4-15).", []string{"approver", "outcome"}, nil),
 	}
 }
 
 func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	for _, d := range []*prometheus.Desc{c.requests, c.outcomes, c.decisions, c.flagged, c.reproposed,
-		c.applied, c.reopened, c.approverSeconds, c.timeToDecision} {
+		c.applied, c.reopened, c.approverSeconds, c.timeToDecision, c.seededAutomated, c.seededHuman} {
 		ch <- d
 	}
 }
@@ -248,6 +280,17 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	g(c.reproposed, r.Reproposed)
 	g(c.applied, r.Applied)
 	g(c.reopened, r.Reopened)
+	// Every outcome, zero included, so a first catch or miss is a change
+	// increase() sees (P4 README finding 6).
+	outcomes := []v1.SeedOutcome{v1.SeedCaught, v1.SeedMissed, v1.SeedPassed, v1.SeedFalseAlarm, v1.SeedUndecided}
+	for _, o := range outcomes {
+		g(c.seededAutomated, r.SeededAutomated[o], string(o))
+	}
+	for name, os := range r.SeededHuman {
+		for _, o := range outcomes[:4] {
+			g(c.seededHuman, os[o], name, string(o))
+		}
+	}
 	for _, a := range r.Approvers {
 		g(c.decisions, a.Approved, a.Name, "approved")
 		g(c.decisions, a.Rejected, a.Name, "rejected")

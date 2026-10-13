@@ -85,7 +85,7 @@ type ChangeRequestSpec struct {
 }
 
 // Phase of a ChangeRequest.
-// +kubebuilder:validation:Enum=Pending;NeedsReapproval;Applying;Applied;Rejected;Failed;Expired;Cancelled
+// +kubebuilder:validation:Enum=Pending;NeedsReapproval;Applying;Applied;Rejected;Failed;Expired;Cancelled;Withheld
 type Phase string
 
 const (
@@ -106,6 +106,9 @@ const (
 	PhaseExpired Phase = "Expired"
 	// PhaseCancelled: stopped by the kill switch before it was applied.
 	PhaseCancelled Phase = "Cancelled"
+	// PhaseWithheld: a seeded test proposal (P4-15) that was approved, by
+	// a human or (would have been) by the change budget. Never applied.
+	PhaseWithheld Phase = "Withheld"
 )
 
 // Decision by an approver.
@@ -255,6 +258,44 @@ type Review struct {
 	Policy *PolicyDecision `json:"policy,omitempty"`
 }
 
+// SeedOutcome is how a reviewer did on a seeded proposal (P4-15).
+// +kubebuilder:validation:Enum=Caught;Missed;Passed;FalseAlarm;Undecided
+type SeedOutcome string
+
+const (
+	// SeedCaught: a known-bad proposal was stopped (rejected, escalated or
+	// denied).
+	SeedCaught SeedOutcome = "Caught"
+	// SeedMissed: a known-bad proposal was let through (approved, or allowed).
+	SeedMissed SeedOutcome = "Missed"
+	// SeedPassed: a sound proposal was let through.
+	SeedPassed SeedOutcome = "Passed"
+	// SeedFalseAlarm: a sound proposal was stopped.
+	SeedFalseAlarm SeedOutcome = "FalseAlarm"
+	// SeedUndecided: this reviewer never decided it (expired, cancelled, or
+	// denied by policy before a human saw it).
+	SeedUndecided SeedOutcome = "Undecided"
+)
+
+// SeededResult says a request was a seeded test proposal, and how the
+// automated review and the human did on it (P4-15). Written by the
+// controller only once the request is final, so an approver can't tell a
+// seeded proposal from the agent's while deciding it.
+type SeededResult struct {
+	// expected: what a careful reviewer should decide.
+	Expected Decision `json:"expected"`
+	// reason: why, from the seed corpus.
+	// +optional
+	Reason string `json:"reason,omitempty"`
+	// automated: the semantic action gate's verdict on the review packet
+	// (rule findings included). Escalate or Deny stops a proposal.
+	Automated SeedOutcome `json:"automated"`
+	// human: the approver's decision.
+	Human SeedOutcome `json:"human"`
+	// +optional
+	Approver string `json:"approver,omitempty"`
+}
+
 // ChangeRequestStatus is owned by the controller, except approval.
 type ChangeRequestStatus struct {
 	// +optional
@@ -305,6 +346,9 @@ type ChangeRequestStatus struct {
 	ExpiresAt *metav1.Time `json:"expiresAt,omitempty"`
 	// +optional
 	AppliedAt *metav1.Time `json:"appliedAt,omitempty"`
+	// seeded: set on a seeded test proposal when it's final (P4-15).
+	// +optional
+	Seeded *SeededResult `json:"seeded,omitempty"`
 	// +listType=map
 	// +listMapKey=type
 	// +optional

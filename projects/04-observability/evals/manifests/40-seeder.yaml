@@ -1,0 +1,69 @@
+# Seeded known-bad proposals (P4-15): the seeder proposes them, from the
+# corpus in git (../seeded/proposals.yaml, scripts/seed-proposals.sh), to
+# measure how often the automated review and the human approvers catch a
+# bad change. A separate identity from the agent and the evaluator.
+#
+# The seed key says which ChangeRequests are seeded, and what a careful
+# reviewer should decide. It's a ConfigMap in the controller's namespace:
+# the controller reads it, the seeder writes it, and approvers and the
+# agent have no access to approval-system at all. So an approver can't
+# tell a seeded proposal from the agent's while deciding; the controller
+# records the result on the request only once it's final.
+#
+# What the seeder can do with it is limited by what the controller does
+# with a seeded request: review it like any other and never apply it. A
+# wrong entry can withhold a change, never apply one.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: seeder
+  namespace: evals
+automountServiceAccountToken: false
+---
+# Entries are added by the seeder: name -> {"expected": ..., "reason": ...}.
+# Re-applying this file keeps them (they aren't in it).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seeded-proposals
+  namespace: approval-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: seeder
+  namespace: approval-system
+rules:
+- apiGroups: [""]
+  resources: [configmaps]
+  resourceNames: [seeded-proposals]
+  verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: seeder
+  namespace: approval-system
+subjects:
+- {kind: ServiceAccount, name: seeder, namespace: evals}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: seeder}
+---
+# Propose, and read back: no status (it can't approve), no update or delete.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: seeder
+  namespace: approvals
+rules:
+- apiGroups: [approval.safe-ops.io]
+  resources: [changerequests]
+  verbs: [create, get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: seeder
+  namespace: approvals
+subjects:
+- {kind: ServiceAccount, name: seeder, namespace: evals}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: seeder}

@@ -117,3 +117,39 @@ func TestLatestEvalRun(t *testing.T) {
 		t.Error("Latest(nil) found a run")
 	}
 }
+
+func TestSeeded(t *testing.T) {
+	seeded := func(phase v1.Phase, approver string, d v1.Decision, auto, human v1.SeedOutcome) v1.ChangeRequest {
+		c := cr(phase, approver, d, time.Minute, "")
+		c.Status.Seeded = &v1.SeededResult{Expected: v1.DecisionRejected, Automated: auto, Human: human, Approver: approver}
+		return c
+	}
+	items := []v1.ChangeRequest{
+		seeded(v1.PhaseRejected, "alice", v1.DecisionRejected, v1.SeedCaught, v1.SeedCaught),
+		seeded(v1.PhaseWithheld, "alice", v1.DecisionApproved, v1.SeedMissed, v1.SeedMissed),
+		seeded(v1.PhaseRejected, "alice", v1.DecisionRejected, v1.SeedMissed, v1.SeedCaught),
+		seeded(v1.PhaseRejected, "", "", v1.SeedCaught, v1.SeedUndecided),  // denied by policy
+		seeded(v1.PhaseWithheld, "", "", v1.SeedMissed, v1.SeedUndecided),  // the budget would have paid
+		cr(v1.PhaseApplied, "alice", v1.DecisionApproved, time.Minute, ""), // not seeded
+	}
+	r := Compute(items)
+	if r.Withheld != 2 {
+		t.Errorf("withheld: %d, want 2", r.Withheld)
+	}
+	if a := r.SeededAutomated; a[v1.SeedCaught] != 2 || a[v1.SeedMissed] != 3 || CatchRate(a) != 0.4 {
+		t.Errorf("automated: %v (rate %v)", a, CatchRate(a))
+	}
+	if h := r.SeededHuman["alice"]; h[v1.SeedCaught] != 2 || h[v1.SeedMissed] != 1 || math.Abs(CatchRate(h)-2.0/3) > 1e-9 {
+		t.Errorf("alice: %v", h)
+	}
+	if len(r.SeededHuman) != 1 {
+		t.Errorf("only alice decided seeded proposals: %v", r.SeededHuman)
+	}
+	// Withheld is final, and an approval there is still a human decision.
+	if r.ByHuman != 4 || r.ByController != 2 {
+		t.Errorf("settled by: human %d, controller %d", r.ByHuman, r.ByController)
+	}
+	if !math.IsNaN(CatchRate(nil)) {
+		t.Error("no decisions: want NaN")
+	}
+}

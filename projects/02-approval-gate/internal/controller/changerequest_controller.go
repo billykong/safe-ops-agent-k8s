@@ -75,9 +75,16 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	switch st.Phase {
 	case approvalv1alpha1.PhaseApplied, approvalv1alpha1.PhaseRejected, approvalv1alpha1.PhaseFailed, approvalv1alpha1.PhaseExpired,
-		approvalv1alpha1.PhaseCancelled:
+		approvalv1alpha1.PhaseCancelled, approvalv1alpha1.PhaseWithheld:
 		return ctrl.Result{}, nil
 	}
+	// Seeded test proposals (P4-15) are never applied. Can't tell whether
+	// this is one: retry, and do nothing meanwhile.
+	seed, err := r.seed(ctx, cr.Name)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	ctx = withSeed(ctx, seed)
 
 	// Kill switch (P2-21), fail closed: unless it says run, nothing that
 	// hasn't started applying will, whoever approved it. An apply already
@@ -113,10 +120,16 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		st.Phase = approvalv1alpha1.PhasePending
 		// The budget is consulted once, here. A request it doesn't pay
-		// for waits for a human, even if budget frees up later.
-		grant, why, err := r.spendBudget(ctx, &cr)
+		// for waits for a human, even if budget frees up later. A seeded
+		// one spends nothing: if the budget would have paid, the automated
+		// path let it through, and it ends here.
+		grant, why, err := r.spendBudget(ctx, &cr, seed == nil)
 		if err != nil {
 			return ctrl.Result{}, err // usually a conflict on the budget: retried
+		}
+		if seed != nil && grant != nil {
+			return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseWithheld,
+				"seeded test proposal: the change budget would have applied it without a human; withheld")
 		}
 		st.BudgetGrant, st.Message = grant, why
 		log.Info("proposed", "plan", st.Plan, "budget", why)
@@ -163,6 +176,10 @@ func (r *ChangeRequestReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 				st.Approval = nil
 				log.Info("hash mismatch", "message", st.Message)
 				return ctrl.Result{}, r.save(ctx, &cr, base)
+			}
+			if seed != nil {
+				return r.finish(ctx, &cr, base, approvalv1alpha1.PhaseWithheld,
+					"seeded test proposal, approved by "+st.Approval.Approver+": withheld, never applied")
 			}
 		}
 		if err := CheckScope(cr.Spec); err != nil { // the spec is immutable, but check again before writing
@@ -316,7 +333,10 @@ func (r *ChangeRequestReconciler) agentRunning(ctx context.Context) (bool, strin
 // keyed by the request's UID: after a crash between the two writes, the
 // retry finds its grant instead of spending another. Returns the grant (nil
 // if the change must wait for a human) and a message explaining why.
-func (r *ChangeRequestReconciler) spendBudget(ctx context.Context, cr *approvalv1alpha1.ChangeRequest) (*approvalv1alpha1.BudgetGrant, string, error) {
+//
+// With spend false (a seeded proposal) nothing is recorded: the grant says
+// only that the budget would have paid.
+func (r *ChangeRequestReconciler) spendBudget(ctx context.Context, cr *approvalv1alpha1.ChangeRequest, spend bool) (*approvalv1alpha1.BudgetGrant, string, error) {
 	var b approvalv1alpha1.ChangeBudget
 	err := r.Get(ctx, types.NamespacedName{Namespace: cr.Namespace, Name: approvalv1alpha1.DefaultBudgetName}, &b)
 	if apierrors.IsNotFound(err) {
@@ -349,6 +369,9 @@ func (r *ChangeRequestReconciler) spendBudget(ctx context.Context, cr *approvalv
 	if len(live) >= int(b.Spec.MaxChanges) {
 		return nil, fmt.Sprintf("waiting for approval: change budget %s is spent (%d of %d autonomous changes used in the last %s)",
 			b.Name, len(live), b.Spec.MaxChanges, window), nil
+	}
+	if !spend {
+		return grant, "", nil
 	}
 	base := b.DeepCopy()
 	b.Status.Grants = append(live, approvalv1alpha1.Grant{ChangeRequest: cr.Name, UID: cr.UID, Time: metav1.NewTime(now)})
@@ -412,6 +435,9 @@ func ReviewHash(cr *approvalv1alpha1.ChangeRequest) (string, error) {
 // finish moves a request to a final phase and records when.
 func (r *ChangeRequestReconciler) finish(ctx context.Context, cr, base *approvalv1alpha1.ChangeRequest, phase approvalv1alpha1.Phase, msg string) (ctrl.Result, error) {
 	cr.Status.Phase, cr.Status.Message = phase, msg
+	if s := seedOf(ctx); s != nil {
+		cr.Status.Seeded = SeedResult(s, cr.Status)
+	}
 	if cr.Status.DecidedAt == nil {
 		t := metav1.NewTime(r.now())
 		cr.Status.DecidedAt = &t
@@ -545,7 +571,7 @@ func (r *ChangeRequestReconciler) openRequests(ctx context.Context, _ client.Obj
 	for _, cr := range l.Items {
 		switch cr.Status.Phase {
 		case approvalv1alpha1.PhaseApplied, approvalv1alpha1.PhaseRejected, approvalv1alpha1.PhaseFailed,
-			approvalv1alpha1.PhaseExpired, approvalv1alpha1.PhaseCancelled:
+			approvalv1alpha1.PhaseExpired, approvalv1alpha1.PhaseCancelled, approvalv1alpha1.PhaseWithheld:
 			continue
 		}
 		reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&cr)})

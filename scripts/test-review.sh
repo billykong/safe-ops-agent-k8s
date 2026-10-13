@@ -159,8 +159,8 @@ sleep 3
 [ "$(phase good-$T)" = Applied ] && [ -n "$(st good-$T '{.status.decidedAt}')" ] && pass "decidedAt recorded" || fail "good-$T: $(phase good-$T), no decidedAt"
 out=$(actl stats)
 row=$(grep "^$APPROVER " <<<"$out" || true)
-# APPROVER APPROVED REJECTED RATE MEDIAN P90 FLAGGED CRITICAL
-read -r _ ap rj rate _ _ fl cr <<<"$row"
+# APPROVER APPROVED REJECTED RATE MEDIAN P90 FLAGGED CRITICAL SEEDED (P4-15)
+read -r _ ap rj rate _ _ fl cr _ <<<"$row"
 [ "$ap" = 2 ] && [ "$rj" = 4 ] && [ "$rate" = "33%" ] && pass "stats: $APPROVER approved 2, rejected 4 (33%)" || fail "stats row: $row"
 [ "$fl" = 1 ] && [ "$cr" = 1 ] && pass "stats: 1 approval of a Critical-flagged request (the scale to zero)" || fail "flagged: $row"
 check "stats: outcomes and time to decision summarised" 'settled by: humans [0-9]+.*time to decision: humans median [0-9]' "$(tr '\n' ' ' <<<"$out")"

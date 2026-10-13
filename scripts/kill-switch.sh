@@ -66,7 +66,7 @@ YAML
 
 open_crs() { # ChangeRequests not yet in a final phase
   kubectl get changerequests -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {.status.phase}{"\n"}{end}' \
-    | awk '$2 !~ /^(Applied|Rejected|Failed|Expired|Cancelled)$/'
+    | awk '$2 !~ /^(Applied|Rejected|Failed|Expired|Cancelled|Withheld)$/'
 }
 
 status() {

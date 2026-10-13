@@ -12,7 +12,7 @@ export PATH     := $(HOME)/.local/go/bin:$(PATH)
 KUBECTL         := kubectl --context kind-$(CLUSTER)
 export CLUSTER
 
-.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability audit test-audit evals test-evals ci-stack eval-gate test-eval-gate eval-kill-switch test-oversight p5 model-server-down test-local-model test-gpu test-serving test-gpu-metrics
+.PHONY: client-image up down node-gvisor-platform node-swap-off cilium coredns-upstream agent-sandbox executor-test executor-image agent-image p1 verify test-executor test-agent attack-demos bench test-egress kata verify-kata attack-demos-kata test-pod-security p2 test-approval test-agent-guard test-budget test-kill-switch durable test-durable test-review p3 test-identity test-llm-gateway test-mcp test-policy red-team p4 test-observability audit test-audit evals test-evals ci-stack eval-gate test-eval-gate eval-kill-switch test-oversight seed-proposals test-seeded p5 model-server-down test-local-model test-gpu test-serving test-gpu-metrics
 
 up:
 	# kind makes a new cluster's context current, which retargets every bare
@@ -314,6 +314,14 @@ eval-kill-switch:
 
 test-oversight:
 	./scripts/test-oversight.sh
+
+# P4-15: seeded known-bad proposals, for the catch rate of the automated
+# review and the approvers. seed-proposals proposes the corpus in git.
+seed-proposals:
+	./scripts/seed-proposals.sh
+
+test-seeded:
+	./scripts/test-seeded.sh
 
 # P5: a local model on the GPU, reached through the LLM gateway only. In the
 # cluster (milestone 2): the WSL GPU driver and the CDI hook into the node,

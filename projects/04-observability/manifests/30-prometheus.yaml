@@ -155,6 +155,20 @@ data:
         labels: {severity: ticket}
         annotations:
           summary: "{{ $labels.approver }} approved a request with a Critical finding"
+      # An approver approved a seeded known-bad proposal (P4-15): it was
+      # withheld, but the same proposal from the agent would have run.
+      # The metric is a gauge whose series appears with an approver's first
+      # seeded decision: a new series above zero counts as well as a rise.
+      - alert: SeededProposalMissed
+        expr: |
+          (safeops_seeded_decisions{outcome="Missed"} > 0
+            unless safeops_seeded_decisions{outcome="Missed"} offset 15m)
+          or
+          (safeops_seeded_decisions{outcome="Missed"}
+            > safeops_seeded_decisions{outcome="Missed"} offset 15m)
+        labels: {severity: ticket}
+        annotations:
+          summary: "{{ $labels.approver }} approved a seeded known-bad proposal (withheld): see approvalctl stats"
       - alert: ChangesReopened
         expr: (safeops_changerequests_reopened / safeops_changerequests_applied > 0.2) and on () (safeops_changerequests_applied >= 5)
         labels: {severity: ticket}
