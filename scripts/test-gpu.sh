@@ -7,8 +7,8 @@
 #    don't match);
 #  - who may get the GPU: only namespace inference; not the code sandbox,
 #    not a pod by CDI annotation (refused by admission, and ignored by
-#    containerd with the policy removed); two time slices, so a third
-#    claim waits;
+#    containerd with the policy removed); three time slices (two for
+#    vLLM, one for the GPU metrics exporter), so a fourth claim waits;
 #  - through the LLM gateway only: an answer and a forced tool call for the
 #    agent's identity; pods elsewhere can't connect; the server wants its
 #    key; one eval scenario judged by the in-cluster model;
@@ -87,7 +87,7 @@ check "the node has the host's WSL driver, current" '\(current\)' "$(scripts/nod
 check "... and the NVIDIA toolkit's CDI hook, pinned" 'NVIDIA CDI Hook version 1\.20\.1' "$(docker exec $NODE /usr/local/nvidia-toolkit/bin/nvidia-cdi-hook --version 2>&1 | head -1)"
 check "the device plugin registered nvidia.com/gpu with the kubelet" 'Registered device plugin for .nvidia.com/gpu.' \
   "$(kubectl logs -n gpu-system ds/nvdp-nvidia-device-plugin 2>&1 | grep Registered | tail -1)"
-check "the node advertises the GPU as two time slices" '^2$' "$(kubectl get node $NODE -o jsonpath='{.status.allocatable.nvidia\.com/gpu}')"
+check "the node advertises the GPU as three time slices" '^3$' "$(kubectl get node $NODE -o jsonpath='{.status.allocatable.nvidia\.com/gpu}')"
 check "the plugin's CDI spec gives /dev/dxg and the WSL driver" 'k8s.device-plugin.nvidia.com/gpu.*"/dev/dxg".*/usr/lib/wsl/drivers' \
   "$(docker exec $NODE cat /var/run/cdi/k8s.device-plugin.nvidia.com-gpu.json | tr -d '\n ')"
 
@@ -127,18 +127,19 @@ check "... and with the policy removed, containerd ignores the annotation: no GP
 kubectl apply -f projects/05-local-inference/manifests/20-gpu-admission.yaml >/dev/null; sleep 3
 check "... (the policy restored)" '^gpu-only-for-inference$' "$(kubectl get validatingadmissionpolicybinding gpu-only-for-inference -o name | cut -d/ -f2)"
 check "a pod in $NS that doesn't ask for the GPU doesn't get it" 'No such file' "$(run_pod nogpu-$T $NS 'ls /dev/dxg 2>&1')"
-# Two slices: vLLM holds one (or both, scaled up); test pods take the rest,
-# and the claim after that waits.
-held=$(kubectl get pods -n $NS -l app=local-model --no-headers | wc -l)
-for i in $(seq 1 $((2 - held))); do
+# Three slices: vLLM holds one (or two, scaled up) and the GPU metrics
+# exporter one (M4); test pods take the rest, and the claim after that
+# waits.
+held=$(kubectl get pods -n $NS -l 'app in (local-model, gpu-metrics)' --no-headers | wc -l)
+for i in $(seq 1 $((3 - held))); do
   pod slice$i-$T $NS 'ls /dev/dxg; sleep 60' "$GPU" | kubectl create -f - >/dev/null
   kubectl wait -n $NS --for=condition=Ready pod/slice$i-$T --timeout=60s >/dev/null 2>&1 || true
-  check "time-slicing: a pod gets slice $((held + i)) of 2 beside vLLM, and the GPU" '^/dev/dxg$' "$(kubectl logs -n $NS slice$i-$T 2>&1)"
+  check "time-slicing: a pod gets slice $((held + i)) of 3 beside vLLM and the exporter, and the GPU" '^/dev/dxg$' "$(kubectl logs -n $NS slice$i-$T 2>&1)"
 done
 pod third-$T $NS 'sleep 5' "$GPU" | kubectl create -f - >/dev/null; sleep 8
-check "... a claim beyond the two slices waits (Pending, insufficient nvidia.com/gpu)" 'Pending.*Insufficient nvidia.com/gpu' \
+check "... a claim beyond the three slices waits (Pending, insufficient nvidia.com/gpu)" 'Pending.*Insufficient nvidia.com/gpu' \
   "$(kubectl get pod -n $NS third-$T -o jsonpath='{.status.phase} {.status.conditions[0].message}')"
-kubectl delete pod -n $NS third-$T $(for i in $(seq 1 $((2 - held))); do echo slice$i-$T; done) --wait=false >/dev/null
+kubectl delete pod -n $NS third-$T $(for i in $(seq 1 $((3 - held))); do echo slice$i-$T; done) --wait=false >/dev/null
 
 echo "=== Through the LLM gateway only (P5-07)"
 check "the gateway routes the local model to the in-cluster server" "^cluster: [12] ready$" "$(scripts/local-model-mode.sh status)"

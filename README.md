@@ -14,7 +14,7 @@ The plan and requirements live in [docs/prd/](docs/prd/README.md). Weaknesses we
 | `projects/03-tool-access/` | Workload identity per agent; the LLM gateway holding the model key, with per-agent budgets; MCP tools behind a gateway with pinned descriptors and argument rules; the prompt-injection red-team ([docs/red-team.md](docs/red-team.md)) |
 | `projects/02-approval-gate/` | `ChangeRequest` CRD and approval controller (kubebuilder): the agent proposes, a human approves, the controller applies |
 | `projects/04-observability/` | OpenTelemetry GenAI traces (one per task, no content), Prometheus and Grafana for tokens, cost and escalation rate; the API audit log, in a hash-chained store the agent can't reach; the replay eval suite with a blind judge, the CI regression gate on it, and a kill-switch drill; oversight and quality metrics from records the agent can't write |
-| `projects/05-local-inference/` | A local model on the host's GPU: vLLM inside the cluster through the NVIDIA device plugin (CDI, on WSL2), behind the Gateway API Inference Extension and scaled on queue depth by KEDA, or in Docker outside it as the fallback; reached through the LLM gateway only, with hash-verified weights; used as an eval judge |
+| `projects/05-local-inference/` | A local model on the host's GPU: vLLM inside the cluster through the NVIDIA device plugin (CDI, on WSL2), behind the Gateway API Inference Extension and scaled on queue depth by KEDA, or in Docker outside it as the fallback; the GPU measured by NVIDIA's DCGM exporter; reached through the LLM gateway only, with hash-verified weights; used as an eval judge |
 | `docs/prd/` | Product requirements: goals, architecture, security requirements, roadmap, and per-project requirements with status |
 
 ## Quick start

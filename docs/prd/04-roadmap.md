@@ -59,8 +59,8 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 ### P5: local inference
 1. **Done.** Model serving outside the cluster as a fallback: vLLM in Docker on the host's GPU, on a network only the cluster's node joins, reached through the LLM gateway only, with hash-verified safetensors weights; used as an eval judge (`make p5 test-local-model`).
 2. **Done.** In-cluster GPU via the device plugin: on kind under WSL2, through CDI (no k3s, no bare metal). vLLM runs as a restricted pod in namespace `inference`; only that namespace may ask for the GPU; the Docker server is the fallback (`make p5 test-gpu`, `scripts/local-model-mode.sh`).
-3. **Done.** Serving stack behind the Gateway API Inference Extension: an InferencePool with llm-d's endpoint picker, behind an agentgateway Gateway that only the LLM gateway may reach. KEDA scales vLLM from 1 to 2 replicas on the GPU's two time slices when requests queue (`make p5 test-serving`).
-4. **Next.** GPU metrics.
+3. **Done.** Serving stack behind the Gateway API Inference Extension: an InferencePool with llm-d's endpoint picker, behind an agentgateway Gateway that only the LLM gateway may reach. KEDA scales vLLM from 1 to 2 replicas on two time slices of the GPU when requests queue (`make p5 test-serving`).
+4. **Done.** GPU metrics: NVIDIA's DCGM exporter, which works on this card under WSL2 (no `nvidia-smi` fallback needed), as a restricted pod on a third time slice of the GPU; into Prometheus with alerts, and a Grafana dashboard beside the pool's queue (`make p5 test-gpu-metrics`). P5's milestones are done. **Phase 4's exit criteria are met**: traces and cost metrics by default (P4 M1), replay evals gate merges (P4 M4), and the local model serves as an eval judge (P5 M1).
 
 ## Deliverables
 

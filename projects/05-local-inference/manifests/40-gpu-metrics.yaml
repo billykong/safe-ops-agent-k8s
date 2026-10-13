@@ -1,0 +1,154 @@
+# GPU metrics (P5-06, M4): NVIDIA's DCGM exporter, for Prometheus. DCGM
+# works on this card under WSL2 (README, finding 22): the device's
+# counters (utilization, memory, clocks, temperature, power, energy), not
+# the profiling ones (DCP: tensor and DRAM activity) or XID errors, which
+# the WSL driver doesn't expose. So no nvidia-smi fallback was needed.
+#
+# An ordinary restricted pod, like vLLM: it gets the GPU the same way, as a
+# CDI device for one nvidia.com/gpu, so the device plugin now advertises
+# three time slices: two for vLLM (KEDA's maximum), one for this. Not a
+# DaemonSet: admission reserves this pod's label for pods the ReplicaSet
+# controller makes (serving/manifests/44-pool-admission.yaml), so a pod
+# wearing it can't feed Prometheus made-up numbers. Not privileged and no
+# host path: the GPU is the device plugin's to hand out (P5-09).
+#
+# Whole-GPU numbers only, not per pod. DCGM's pod mapping reads the
+# kubelet's pod-resources socket (a host path), and under time-slicing
+# both vLLM replicas share one device anyway; WSL's driver lists no
+# processes either. Per replica, vLLM's own metrics say what each is doing
+# (through the endpoint picker).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gpu-metrics-counters
+  namespace: inference
+data:
+  # What the exporter collects: the default set, less what this driver
+  # doesn't report (profiling, XID errors, NVLink, row remapping), so
+  # nothing is silently missing.
+  counters.csv: |
+    DCGM_FI_DEV_GPU_UTIL,                gauge,   GPU utilization (in %).
+    DCGM_FI_DEV_MEM_COPY_UTIL,           gauge,   Memory utilization (in %).
+    DCGM_FI_DEV_ENC_UTIL,                gauge,   Encoder utilization (in %).
+    DCGM_FI_DEV_DEC_UTIL,                gauge,   Decoder utilization (in %).
+    DCGM_FI_DEV_FB_FREE,                 gauge,   Framebuffer memory free (in MiB).
+    DCGM_FI_DEV_FB_USED,                 gauge,   Framebuffer memory used (in MiB).
+    DCGM_FI_DEV_FB_RESERVED,             gauge,   Framebuffer memory reserved (in MiB).
+    DCGM_FI_DEV_SM_CLOCK,                gauge,   SM clock frequency (in MHz).
+    DCGM_FI_DEV_MEM_CLOCK,               gauge,   Memory clock frequency (in MHz).
+    DCGM_FI_DEV_GPU_TEMP,                gauge,   GPU temperature (in C).
+    DCGM_FI_DEV_POWER_USAGE,             gauge,   Power draw (in W).
+    DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION, counter, Total energy consumption since boot (in mJ).
+    DCGM_FI_DEV_PCIE_REPLAY_COUNTER,     counter, Total number of PCIe retries.
+    DCGM_FI_DRIVER_VERSION,              label,   Driver Version
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gpu-metrics
+  namespace: inference
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-metrics
+  namespace: inference
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # one slice is its; a second pod would wait for it
+  selector:
+    matchLabels: {app: gpu-metrics}
+  template:
+    metadata:
+      labels: {app: gpu-metrics}
+    spec:
+      serviceAccountName: gpu-metrics
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: dcgm-exporter
+        image: nvcr.io/nvidia/k8s/dcgm-exporter:4.6.1-4.8.4-distroless@sha256:148b0c025e5f2850256816fa33754fbf4733b7a086697a95613fc0ba3db5b003
+        imagePullPolicy: IfNotPresent
+        command: [/usr/bin/dcgm-exporter]
+        args:
+        - --collectors=/etc/dcgm-exporter/counters.csv
+        - --collect-interval=10000
+        - --address=:9400
+        env:
+        # The driver's libraries, from the CDI spec's mounts (WSL layout).
+        - {name: LD_LIBRARY_PATH, value: /usr/lib/wsl/lib}
+        # The hostname label on every metric: the node, not this pod.
+        - name: NODE_NAME
+          valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+        ports:
+        - {name: metrics, containerPort: 9400}
+        # No probes: the kubelet's arrive as world here (P1 finding 6), and
+        # the health endpoint shares the metrics port, which only
+        # Prometheus may reach. Prometheus's up{job="gpu"} and the
+        # GPUMetricsDown alert watch it instead.
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        # About 400 MiB resident, most of it the driver and DCGM's
+        # libraries: 256 MiB was OOM-killed at start.
+        resources:
+          requests: {cpu: 20m, memory: 448Mi}
+          limits: {cpu: 500m, memory: 768Mi, nvidia.com/gpu: 1}
+        volumeMounts:
+        - {name: counters, mountPath: /etc/dcgm-exporter/counters.csv, subPath: counters.csv, readOnly: true}
+      volumes:
+      - name: counters
+        configMap: {name: gpu-metrics-counters}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gpu-metrics
+  namespace: inference
+spec:
+  selector: {app: gpu-metrics}
+  ports:
+  - {name: metrics, port: 9400, targetPort: metrics}
+---
+# Prometheus scrapes it; nothing else reaches it, and it reaches nothing
+# (namespace inference is default-deny, and no egress is allowed here):
+# DCGM runs inside the exporter, with no host engine to call.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gpu-metrics
+  namespace: inference
+spec:
+  endpointSelector:
+    matchLabels: {app: gpu-metrics}
+  ingress:
+  - fromEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: observability, app: prometheus}
+    toPorts: [{ports: [{port: "9400", protocol: TCP}]}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: prometheus-to-gpu-metrics
+  namespace: observability
+spec:
+  endpointSelector:
+    matchLabels: {app: prometheus}
+  egress:
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: kube-system, k8s:k8s-app: kube-dns}
+    toPorts:
+    - ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}]
+      rules:
+        dns:
+        - matchName: gpu-metrics.inference.svc.cluster.local
+  - toEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: inference, app: gpu-metrics}
+    toPorts: [{ports: [{port: "9400", protocol: TCP}]}]
