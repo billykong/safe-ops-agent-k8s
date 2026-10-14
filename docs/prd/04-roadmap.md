@@ -12,7 +12,7 @@ flowchart LR
   P5 -. weak target for red-team .-> P3
 ```
 
-Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P5 alongside P4**, since a local judge model feeds the evals.
+Priority order, given limited time: **P1 → P2 → P3 → P4**, with **P5 alongside P4**, since a local judge model feeds the evals.
 
 | Phase | Scope | Exit criteria |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 | 2 | P2 | An agent proposal goes through human approval to apply, with every self-approval and TOCTOU closure tested; kill switch tested |
 | 3 | P3 | The agent uses an LLM through the gateway and tools through MCP, holding no secrets; red-team log shows the gate holding when the model complies |
 | 4 | P4 + P5 | Traces and cost metrics by default; replay evals gate merges; local model serves as judge/guard |
-| 5 | Publication | Capstone architecture write-up and talk |
+| 5 | Publication | The repo public and clean; a blog post; the capstone architecture write-up; a video of it on YouTube |
 
 ## Milestones
 
@@ -67,17 +67,15 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 
 | Deliverable | When |
 | --- | --- |
-| Public reference repo with README, threat model and tests | Continuous; public now |
-| Blog post per major control (sandbox isolation, approval gate, identity and policy, evals) | As each project completes |
-| Capstone: "Defence in depth for autonomous infrastructure agents", with architecture diagram; submitted as a meetup or conference talk | After phase 4 |
-| Companion library `agent-guardrails` (framework-agnostic: action guard, change budget, kill switch, approval gate, audit log, independent review) | Separate repo; this repo integrates it once it exists |
+| Public reference repo with README, threat model and tests, passing its own pre-publish scan | Phase 5, first |
+| A blog post on the project, on the author's blog | Phase 5, after the repo is public |
+| Capstone: "Defence in depth for autonomous infrastructure agents", with architecture diagram, as a write-up and a YouTube video. The video is produced with AI tools (script drafting, narration, editing), shows real recordings from the cluster (the red-team, the kill-switch drill, an approval end to end) rather than generated footage, and says in its description how AI was used | Phase 5, after the blog post |
 
 ## Engineering hygiene backlog
 
 - **CI.** The eval gate and the kill-switch drill run on every PR (P4 M4, M5). Still to add: lint, the Go and Python unit tests, and the other suites on kind.
 - **Image pinning and signing** (SEC-30). Pin base images by digest, and sign and verify our own images.
 - **`gitleaks`** in CI.
-- **Repo README threat-model section** linking to [03-security.md](03-security.md).
 
 ## Open questions
 

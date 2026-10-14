@@ -100,7 +100,21 @@ Before every push to the public repo:
 
 ```bash
 grep -rnE 'privileged: *true|hostNetwork: *true|hostPID: *true|hostPath:|cluster-admin|failurePolicy: *Ignore|:latest|trust-remote-code|allowPrivilegeEscalation: *true|0\.0\.0\.0|curl .*\| *(ba)?sh' .
-gitleaks detect --source . --no-banner
+docker run --rm -v "$PWD":/repo:ro zricethezav/gitleaks:v8.24.3 git /repo --no-banner --redact
 ```
 
-Each hit needs a fix or a comment explaining why it's safe. Hits in `docs/prd/` where the requirement text itself forbids the pattern (e.g. "never `privileged: true`") are expected. Nothing derived from employer systems is published; examples stay generic.
+gitleaks scans the whole history, not just the current files. It runs from its image, so nothing is installed on the host.
+
+Each hit needs a fix or an explanation of why it's safe. Expected hits (last checked 2026-10-14):
+
+| Hit | Why it's safe |
+| --- | --- |
+| `docs/prd/`, READMEs and test scripts | Requirement text, findings and checks that forbid or test for the pattern (e.g. "never `privileged: true`", "no `--trust-remote-code`") |
+| `cluster-admin` in comments, the runbook and the audit policy | Statements that something is *not* cluster-admin, that the kill switch needs it, or rules that audit cluster admins |
+| `hostPath:` in `cluster/kind-gvisor.yaml` | kind `extraMounts`: the host's `runsc` binaries mounted read-only into the node, not into any pod |
+| `hostPath:` in P5 (`device-plugin/kustomize-patch.yaml`, `manifests/30-inference.yaml`) | The WSL driver for the privileged device plugin, alone in `gpu-system` (P5-09); the hash-verified weights, mounted read-only into vLLM |
+| `privileged: true` in `device-plugin/values.yaml` | The NVIDIA device plugin, alone in namespace `gpu-system`; no workload runs privileged (P5-09) |
+| `0.0.0.0` in servers' listen addresses | Listening inside the pod's own network namespace; who can connect is decided by network policy |
+| gitleaks: `GATEWAY_API_SHA` in `scripts/serving-stack.sh` | The published SHA-256 of a public manifest, not a secret; ignored in `.gitleaksignore` |
+
+Nothing derived from any employer's systems is published; examples stay generic.
