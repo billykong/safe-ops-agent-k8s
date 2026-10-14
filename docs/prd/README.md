@@ -25,7 +25,7 @@ This folder is the product requirements document (PRD) for the whole project: wh
 | P2 Approval gate | **Phase 2 complete**: milestones 1-6 done, exit criteria met |
 | P3 Tool identity and policy | **Phase 3 complete**: milestones 1-5 done, exit criteria met |
 | P4 Observability and evals | Done: milestones 1-6 (telemetry, API audit log, replay evals, CI regression gate, oversight and quality metrics with a kill-switch drill, seeded known-bad proposals) |
-| P5 Local inference | Milestones 1-2 done (vLLM on the GPU inside the cluster through the device plugin, with a Docker server outside it as the fallback; through the LLM gateway only; the local model as an eval judge) |
+| P5 Local inference | Done: milestones 1-4 (vLLM on the GPU inside the cluster through the device plugin, with a Docker server outside it as the fallback; through the LLM gateway only; the local model as an eval judge; the Gateway API Inference Extension with KEDA scaling; GPU metrics from DCGM) |
 
 ## Conventions
 
