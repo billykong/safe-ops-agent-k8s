@@ -20,7 +20,7 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 | 2 | P2 | An agent proposal goes through human approval to apply, with every self-approval and TOCTOU closure tested; kill switch tested |
 | 3 | P3 | The agent uses an LLM through the gateway and tools through MCP, holding no secrets; red-team log shows the gate holding when the model complies |
 | 4 | P4 + P5 | Traces and cost metrics by default; replay evals gate merges; local model serves as judge/guard |
-| 5 | Publication | Capstone architecture write-up and talk |
+| 5 | Publication | Capstone architecture write-up, and a video of it on YouTube |
 
 ## Milestones
 
@@ -69,7 +69,7 @@ Priority order, given limited hobby hours: **P1 → P2 → P3 → P4**, with **P
 | --- | --- |
 | Public reference repo with README, threat model and tests | Continuous; public now |
 | Blog post per major control (sandbox isolation, approval gate, identity and policy, evals) | As each project completes |
-| Capstone: "Defence in depth for autonomous infrastructure agents", with architecture diagram; submitted as a meetup or conference talk | After phase 4 |
+| Capstone: "Defence in depth for autonomous infrastructure agents", with architecture diagram, as a write-up and a YouTube video. The video is produced with AI tools (script drafting, narration, editing), shows real recordings from the cluster (the red-team, the kill-switch drill, an approval end to end) rather than generated footage, and says in its description how AI was used | After phase 4 |
 | Companion library `agent-guardrails` (framework-agnostic: action guard, change budget, kill switch, approval gate, audit log, independent review) | Separate repo; this repo integrates it once it exists |
 
 ## Engineering hygiene backlog

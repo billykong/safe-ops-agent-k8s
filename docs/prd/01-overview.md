@@ -67,4 +67,4 @@ The repo is the Kubernetes deployment layer for a planned companion library, `ag
 | Red-team outcomes | For each attack in the red-team plan, the log names the layer that stopped it; "the gate holds even when the model complies" |
 | Operational metrics (P4) | Reopen rate, escalation rate and cost per task are tracked alongside throughput. Targets are set after a baseline exists |
 | Oversight health (P2/P4) | Approval rate, time to approve and catch rate on seeded known-bad proposals are measured. A near-100% approval rate with seconds-long reviews is treated as a finding |
-| Publication | Reference repo public, with a blog post or talk per major project and a capstone architecture write-up |
+| Publication | Reference repo public, with a blog post per major project, and a capstone architecture write-up with a YouTube video of it |
