@@ -64,3 +64,7 @@ The agent is treated as untrusted: its inputs can be attacker-controlled, so eve
 ## Publishing
 
 Before pushing, run the red-flag scan and gitleaks described in [docs/prd/03-security.md](docs/prd/03-security.md#publishing-rules).
+
+## License
+
+[MIT](LICENSE).
