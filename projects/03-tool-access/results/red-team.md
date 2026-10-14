@@ -1,6 +1,6 @@
 # Red-team results
 
-Last run 2026-10-10T12:02:01Z on `94a4c45` by `scripts/red-team.sh`, model: the mock (complies with every instruction). Plan and catalogue: [docs/red-team.md](../../../docs/red-team.md); history: [docs/red-team-log.md](../../../docs/red-team-log.md).
+Last run 2026-10-11T05:26:32Z on `3b82dca` by `scripts/red-team.sh`, model: the mock (complies with every instruction). Plan and catalogue: [docs/red-team.md](../../../docs/red-team.md); history: [docs/red-team-log.md](../../../docs/red-team-log.md).
 
 **13 stopped, 1 open, 0 not stopped.**
 
