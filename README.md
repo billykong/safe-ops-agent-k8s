@@ -52,6 +52,15 @@ make test-oversight            # oversight and quality metrics, their alerts, no
 ./scripts/new-approver.sh NAME # issue an approver certificate; then approvalctl with that kubeconfig
 ```
 
+## Threat model and limits
+
+The agent is treated as untrusted: its inputs can be attacker-controlled, so every control sits where the agent and the code it runs can't reach it. [docs/prd/03-security.md](docs/prd/03-security.md) maps each risk in the OWASP Top 10 for Agentic Applications to the control and the test that covers it, and states the residual risks. In short:
+
+- **Prompt injection isn't solved.** The design limits its impact; [docs/red-team.md](docs/red-team.md) runs a model that obeys every injected instruction and names the layer that stops each attack.
+- **Most tests use a mock model**, deterministic and free. A real model has been exercised by one live call; a red-team pass against it is on the [cadence](docs/red-team.md#cadence).
+- **It's a single-node lab on WSL2**, not a production deployment: no HA, single replicas, a Temporal dev server, and WSL2-specific workarounds noted where they apply.
+- **Known gaps** are reproduced by the suites and reported as `GAP`, with severity and options, in [docs/known-gaps.md](docs/known-gaps.md).
+
 ## Publishing
 
-Run the pre-publish red-flag scan in `billy-notes/kubernetes/agentic-track-security-review.md` before pushing anything public. Check employer IP terms first.
+Before pushing, run the red-flag scan and gitleaks described in [docs/prd/03-security.md](docs/prd/03-security.md#publishing-rules).

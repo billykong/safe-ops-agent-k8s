@@ -20,8 +20,6 @@ Most agent demos ignore both, or rely on guardrails inside the agent process, wh
 
 It runs entirely on a laptop (kind on WSL2), so anyone can reproduce it.
 
-The repo is the Kubernetes deployment layer for a planned companion library, `agent-guardrails`, which will hold the framework-agnostic safety logic (action guard, change budget, kill switch, approval gate, audit log, independent review). This repo shows those patterns running in production-like isolation.
-
 ## Audience
 
 | Who | What they need from it |
@@ -46,7 +44,7 @@ The repo is the Kubernetes deployment layer for a planned companion library, `ag
 - **Solving prompt injection.** The design limits the *impact* of injection; it doesn't claim to prevent it.
 - **A capable agent.** The agent's reasoning quality is not the point. A simple or scripted agent is fine wherever it exercises the controls.
 - **Agent framework comparisons.** Frameworks are used only where they serve a requirement (e.g. durable execution in P2).
-- **Low-latency or trading-infrastructure work.** That's a separate learning track, outside this repo.
+- **Low-latency infrastructure work.** Outside this repo.
 
 ## Design principles
 
