@@ -58,3 +58,10 @@ docker exec safe-ops-control-plane runsc --network=none do /bin/true
 ```
 
 Add `--platform=ptrace` or `--platform=kvm` to compare platforms. That's how the systrap failure of 2026-10-09 was found (P1 finding 32): after a `.wslconfig` change, systrap failed, and the node moved to the KVM platform.
+
+If pods can't reach each other after the restart (on 2026-10-14 the agent worker crash-looped, timing out on Temporal at port 7233), check Cilium's IP cache. That time, every pod IP was listed as `reserved:unmanaged`, so policy dropped all pod-to-pod traffic (`cilium-dbg monitor --type drop` showed `Policy denied ... ->unmanaged`). Restarting the Cilium agent rebuilt the cache; then restart any pod still in a crash-loop backoff:
+
+```bash
+kubectl --context kind-safe-ops -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg ip list | grep unmanaged
+kubectl --context kind-safe-ops -n kube-system rollout restart ds/cilium
+```

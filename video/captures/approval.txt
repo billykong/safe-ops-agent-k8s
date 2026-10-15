@@ -1,0 +1,37 @@
+#title approval: INC-1001, end to end
+$ scripts/agent-task.sh video-1791980042 web "Look into incident INC-1001 and fix it. [mock:tool:incidents__get_incident:{\"incident_id\":\"INC-1001\"}]"
+3becbe0f0378da0c5bf60c782b69b864
+$ kubectl get changerequest -n approvals video-1791980042
+NAME               ACTION            TARGET   PHASE     APPROVER   BUDGET   EXPIRES     AGE
+video-1791980042   ScaleDeployment   web      Pending                       <invalid>   5s
+#@ propose
+$ approvalctl show video-1791980042
+COMPUTED BY THE CONTROLLER  (from the cluster, by code; this is what runs)
+action                      ScaleDeployment Deployment workloads/web replicas=3  (typed, schema-checked)
+scope                       namespaces [workloads], kinds [Deployment]
+pre-state                   generation 367, replicas 1, restartedAt 2026-10-13T00:45:21Z
+diff                        spec.replicas: 1 -> 3
+dry run                     accepted
+blast radius                adds 2 pods (1 -> 3)
+                            ready now 1 of 1; disruption budgets: (none)
+findings                    WARNING LargeScaleUp: more than doubles the replicas (1 -> 3)
+policy                      Escalate
+                            - Warning finding LargeScaleUp: more than doubles the replicas (1 -> 3)
+plan                        {"spec":{"replicas":3}}
+rollback plan               {"spec":{"replicas":1}}
+rollback check              passed: the rollback patch, applied to the dry run's result, restores the pre-state exactly
+budget                      no change budget: every change needs an approver
+review hash                 sha256:62ff82a46e0eb2bddbdd4eefa8320a6b42aebe3fb16f91e7018d9abe3ab51fd5
+expires                     2026-10-14T13:14:05Z (in 59m54s)
+PROPOSER'S ACCOUNT          (free text from the agent, not verified: weigh it last)
+intent                      [model's reasoning, not verified] the instruction asks for 3 replicas
+[tools read] incidents__get_incident
+blast radius  not assessed by the agent: see the controller's review packet  (claimed)
+rollback      apply the controller's recorded rollbackPlan  (claimed)
+#@ show
+$ approvalctl approve video-1791980042 --yes
+Approved recorded as billy.
+phase: Applied: applied (approved by billy); rollbackPlan undoes it
+$ kubectl get deploy -n workloads web
+NAME   READY   UP-TO-DATE   AVAILABLE   AGE
+web    1/3     3            1           8d
