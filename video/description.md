@@ -24,6 +24,6 @@ How do you let an AI agent investigate and fix infrastructure without trusting i
 07:32 Costs, limits and the short version
 
 Code, tests and the ten known gaps (MIT): https://github.com/billykong/safe-ops-agent-k8s
-The full write-up: https://billykong.github.io/2026/10/21/defence-in-depth-for-autonomous-infrastructure-agents.html
+The full write-up: https://billykong.github.io/2026/10/15/defence-in-depth-for-autonomous-infrastructure-agents.html
 
 How this video was made: the script was drafted with AI (Claude) from the write-up, then checked and edited by me; the narration is an AI voice (Kokoro, running locally); the slides are generated from code. All terminal output is real, recorded from runs on the lab cluster, replayed at the narration's pace. The model in the demos is the project's mock model, which obeys every instruction it reads.

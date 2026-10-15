@@ -1,7 +1,7 @@
 // The capstone video: narration and what's on screen, one beat at a time.
 // Each beat is narrated separately, so the screen changes when the voice
 // moves on. Scripted from the capstone post (billykong.github.io,
-// 2026-10-21); keep the two saying the same thing.
+// 2026-10-15); keep the two saying the same thing.
 //
 // Visual types: title, statement, cards, arch, layer, terminal, table, list.
 // `show` is how many items are visible during the beat; on a terminal beat
