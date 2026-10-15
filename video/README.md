@@ -1,6 +1,6 @@
 # The capstone video
 
-A narrated video of the capstone, [Defence in depth for autonomous infrastructure agents](https://billykong.github.io/2026/10/15/defence-in-depth-for-autonomous-infrastructure-agents.html): one task traced through the eight layers, with real output from the cluster. About 8 and a half minutes, 1920x1080, in the style of the post's thumbnail.
+A narrated video of the capstone, [Defence in depth for autonomous infrastructure agents](https://billykong.github.io/2026/10/15/defence-in-depth-for-autonomous-infrastructure-agents.html): one task traced through the eight layers, with real output from the cluster. Published at https://youtu.be/pDVeg_Gb_i8. About 8 and a half minutes, 1920x1080, in the style of the post's thumbnail.
 
 ```bash
 video/build.sh            # writes video/out/capstone.mp4, captions.srt and thumbnail.png

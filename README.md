@@ -4,6 +4,8 @@ Reference implementation of a safe autonomous ops agent on Kubernetes: sandboxed
 
 The plan and requirements live in [docs/prd/](docs/prd/README.md). Weaknesses we have reproduced but not yet closed are tracked in [docs/known-gaps.md](docs/known-gaps.md).
 
+Write-ups: [Defence in depth for autonomous infrastructure agents](https://billykong.github.io/2026/10/15/defence-in-depth-for-autonomous-infrastructure-agents.html), the architecture layer by layer, also as [a 9-minute video](https://youtu.be/pDVeg_Gb_i8) with demos from the cluster ([source](video/)); and [Eight things building a safe AI ops agent taught me](https://billykong.github.io/2026/10/14/what-building-a-safe-ops-agent-taught-me.html).
+
 ## Layout
 
 | Path | Purpose |
